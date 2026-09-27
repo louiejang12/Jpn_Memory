@@ -19,10 +19,10 @@
     <!-- 홈 -->
     <section class="view" id="view-home">
       <header class="topbar">
-        <div class="stat-pill" title="연속 학습일"><span>🔥</span><b id="h-streak">0</b></div>
-        <div class="stat-pill" title="총 XP"><span>⚡</span><b id="h-xp">0</b></div>
-        <div class="stat-pill" title="오답노트"><span>📕</span><b id="h-wrong">0</b></div>
-        <button class="icon-btn" id="settingsBtn" aria-label="설정">⚙️</button>
+        <div class="stat-pill" title="연속 학습일"><i data-ic="flame"></i><b id="h-streak">0</b></div>
+        <div class="stat-pill" title="총 XP"><i data-ic="bolt"></i><b id="h-xp">0</b></div>
+        <div class="stat-pill" title="오답노트"><i data-ic="note"></i><b id="h-wrong">0</b></div>
+        <button class="icon-btn" id="settingsBtn" aria-label="설정"><i data-ic="sliders"></i></button>
       </header>
       <div class="scroll" id="home-body"></div>
     </section>
@@ -48,7 +48,7 @@
     <!-- 퀴즈 -->
     <section class="view" id="view-quiz">
       <header class="quiz-top">
-        <button class="icon-btn close" id="quitBtn" aria-label="그만하기">✕</button>
+        <button class="icon-btn close" id="quitBtn" aria-label="그만하기"><i data-ic="close"></i></button>
         <div class="progress"><div class="bar" id="q-bar"></div></div>
         <div class="combo" id="q-combo"></div>
       </header>
@@ -64,25 +64,25 @@
     <!-- 플래시카드 -->
     <section class="view" id="view-flash">
       <header class="quiz-top">
-        <button class="icon-btn close" id="flashQuit" aria-label="닫기">✕</button>
+        <button class="icon-btn close" id="flashQuit" aria-label="닫기"><i data-ic="close"></i></button>
         <div class="progress"><div class="bar blue" id="f-bar"></div></div>
-        <button class="icon-btn small" id="flashDir" aria-label="방향 바꾸기">⇄</button>
+        <button class="icon-btn small" id="flashDir" aria-label="방향 바꾸기"><i data-ic="swap"></i></button>
       </header>
       <main class="flash-main" id="f-main"></main>
     </section>
 
     <nav class="tabbar" id="tabbar">
-      <button data-tab="home" class="active"><span>🏠</span>학습</button>
-      <button data-tab="wrong"><span>📕</span>오답노트</button>
-      <button data-tab="words"><span>📖</span>단어장</button>
-      <button data-tab="stats"><span>📊</span>기록</button>
+      <button data-tab="home" class="active"><i data-ic="home"></i>학습</button>
+      <button data-tab="wrong"><i data-ic="wrong"></i>오답노트</button>
+      <button data-tab="words"><i data-ic="book"></i>단어장</button>
+      <button data-tab="stats"><i data-ic="chart"></i>기록</button>
     </nav>
   </div>
 
   <!-- 설정 시트 -->
   <div class="sheet-backdrop" id="sheet" hidden>
     <div class="sheet" role="dialog" aria-label="설정">
-      <div class="sheet-head"><h2>설정</h2><button class="icon-btn" id="sheetClose" aria-label="닫기">✕</button></div>
+      <div class="sheet-head"><h2>설정</h2><button class="icon-btn" id="sheetClose" aria-label="닫기"><i data-ic="close"></i></button></div>
       <div id="settings-body"></div>
     </div>
   </div>

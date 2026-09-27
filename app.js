@@ -68,7 +68,7 @@ const DEFAULT_SETTINGS = {
   write: 'normal', // normal | more | always
   len: 15,
   sfx: true,
-  tts: false,
+  tts: true,
   goal: 100,
 };
 let state = load();
@@ -83,6 +83,8 @@ function load() {
   s.xp = s.xp || 0;
   s.settings = Object.assign({}, DEFAULT_SETTINGS, s.settings || {});
   s.settings.types = Object.assign({}, DEFAULT_SETTINGS.types, s.settings.types || {});
+  // v2: 답하면 단어 읽어주기를 기본으로 켬
+  if (!s.settings.v2) { s.settings.tts = true; s.settings.v2 = true; }
   return s;
 }
 function save() {
@@ -295,28 +297,135 @@ function makeQuestion(w, type) {
  * 효과음 / 발음
  * ============================================================ */
 let actx = null;
-function beep(notes) {
-  if (!state.settings.sfx) return;
-  try {
-    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    let t = actx.currentTime;
-    notes.forEach(([f, d, type]) => {
-      const o = actx.createOscillator();
-      const g = actx.createGain();
-      o.type = type || 'sine';
-      o.frequency.value = f;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.18, t + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + d);
-      o.connect(g).connect(actx.destination);
-      o.start(t); o.stop(t + d + 0.02);
-      t += d * 0.8;
-    });
-  } catch (e) { /* 무시 */ }
+let master = null;
+function audio() {
+  if (!actx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    actx = new AC();
+    const comp = actx.createDynamicsCompressor();
+    master = actx.createGain();
+    master.gain.value = 0.9;
+    master.connect(comp).connect(actx.destination);
+  }
+  if (actx.state === 'suspended') actx.resume();
+  return actx;
 }
-const sfxRight = () => beep([[880, 0.1], [1320, 0.18]]);
-const sfxWrong = () => beep([[220, 0.14, 'square'], [180, 0.2, 'square']]);
-const sfxDone = () => beep([[660, 0.1], [880, 0.1], [1100, 0.1], [1320, 0.25]]);
+// iOS 등은 첫 터치 때 오디오를 깨워야 소리가 나요
+['pointerdown', 'touchstart', 'keydown'].forEach((ev) =>
+  window.addEventListener(ev, () => {
+    if (state.settings.sfx) audio();
+    if (state.settings.tts && 'speechSynthesis' in window) {
+      try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch (e) { /* 무시 */ }
+    }
+  }, { once: true, passive: true }));
+
+// 종소리 같은 음 하나: 기본음 + 배음, 빠른 어택 + 자연스러운 감쇠
+function tone(freq, at, dur, o = {}) {
+  const ctx = actx;
+  const t = ctx.currentTime + at;
+  const out = ctx.createGain();
+  const peak = o.gain ?? 0.22;
+  out.gain.setValueAtTime(0.0001, t);
+  out.gain.exponentialRampToValueAtTime(peak, t + (o.attack ?? 0.008));
+  out.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  let node = out;
+  if (o.lowpass) {
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = o.lowpass;
+    out.connect(f);
+    node = f;
+  }
+  node.connect(master);
+  (o.partials || [[1, 1]]).forEach(([mul, g]) => {
+    const osc = ctx.createOscillator();
+    const pg = ctx.createGain();
+    osc.type = o.type || 'sine';
+    osc.frequency.setValueAtTime(freq * mul, t);
+    if (o.slide) osc.frequency.exponentialRampToValueAtTime(freq * mul * o.slide, t + dur);
+    pg.gain.value = g;
+    osc.connect(pg).connect(out);
+    osc.start(t);
+    osc.stop(t + dur + 0.05);
+  });
+}
+const BELL = [[1, 1], [2, 0.35], [3, 0.12], [4.2, 0.05]];
+const SFX = {
+  // 정답: 밝게 올라가는 "띠-링"
+  right() {
+    tone(1046.5, 0, 0.35, { partials: BELL, gain: 0.2 });   // C6
+    tone(1568, 0.09, 0.6, { partials: BELL, gain: 0.22 });  // G6
+    tone(2093, 0.09, 0.45, { gain: 0.04 });
+  },
+  // 오답: 낮게 내려가는 "뚱-둥"
+  wrong() {
+    tone(330, 0, 0.18, { type: 'triangle', gain: 0.28, lowpass: 900, partials: [[1, 1], [2, 0.3]] });
+    tone(220, 0.15, 0.32, { type: 'triangle', gain: 0.28, lowpass: 700, partials: [[1, 1], [2, 0.3]], slide: 0.92 });
+  },
+  // 글자 타일/보기 누를 때 "톡"
+  tap() {
+    tone(1400, 0, 0.06, { type: 'triangle', gain: 0.07, slide: 0.6 });
+  },
+  // 타일 빼기
+  untap() {
+    tone(900, 0, 0.06, { type: 'triangle', gain: 0.06, slide: 0.7 });
+  },
+  // 연속 정답 보너스
+  combo() {
+    [1318.5, 1568, 2093, 2637].forEach((f, i) => tone(f, 0.28 + i * 0.05, 0.3, { partials: BELL, gain: 0.08 }));
+  },
+  // 레슨 완료 팡파레
+  done() {
+    const seq = [[523.25, 0], [659.25, 0.12], [783.99, 0.24], [1046.5, 0.36]];
+    seq.forEach(([f, at]) => tone(f, at, 0.3, { type: 'triangle', partials: [[1, 1], [2, 0.25]], gain: 0.18 }));
+    [1046.5, 1318.5, 1568].forEach((f) => tone(f, 0.55, 1.1, { partials: BELL, gain: 0.12 }));
+  },
+  flip() {
+    tone(600, 0, 0.12, { type: 'sine', gain: 0.06, slide: 1.8 });
+  },
+};
+function sfx(name) {
+  if (!state.settings.sfx) return;
+  try { if (audio()) SFX[name](); } catch (e) { /* 무시 */ }
+}
+
+/* ============================================================
+ * 아이콘 (SVG)
+ * ============================================================ */
+const ICONS = {
+  flame: '<path fill="currentColor" stroke="none" d="M13.2 2.2s.9 3.6-1.7 6.2c-1.4 1.4-2.1-1-2.1-1S6.5 10.3 6.5 14.6A5.5 5.5 0 0 0 12 20.1a5.5 5.5 0 0 0 5.5-5.5c0-5.4-4.3-7.7-4.3-12.4z"/>',
+  bolt: '<path fill="currentColor" stroke="none" d="M13.5 2 4.5 13.5h6.5L9.8 22l9.2-12h-6.6z"/>',
+  note: '<path fill="currentColor" stroke="none" d="M6 2.5h11a2.5 2.5 0 0 1 2.5 2.5v16.5H7.5A2.5 2.5 0 0 1 5 19V3.5a1 1 0 0 1 1-1z"/><path stroke="#fff" d="M9 7.5h6.5M9 11h4"/>',
+  sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  swap: '<path d="M4 8h15l-4-4M20 16H5l4 4"/>',
+  home: '<path d="M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1H15v-6H9v6H4.5a1 1 0 0 1-1-1z"/>',
+  wrong: '<path d="M6 2.5h11a2.5 2.5 0 0 1 2.5 2.5v16.5H7.5A2.5 2.5 0 0 1 5 19V3.5a1 1 0 0 1 1-1z"/><path d="M10 8l4.5 4.5M14.5 8 10 12.5"/>',
+  book: '<path d="M2.5 5h6.5a3 3 0 0 1 3 3v13a2.5 2.5 0 0 0-2.5-2.5h-7zM21.5 5H15a3 3 0 0 0-3 3v13a2.5 2.5 0 0 1 2.5-2.5h7z"/>',
+  chart: '<path d="M5 20V11M12 20V4M19 20v-7"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+  speaker: '<path fill="currentColor" d="M11 5 6.5 9H3.5v6h3L11 19z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',
+  keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h1M10.5 10h1M14.5 10h1M7.5 14h9"/>',
+  tiles: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
+  star: '<path fill="currentColor" stroke="none" d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/>',
+  cards: '<rect x="3" y="6" width="13" height="15" rx="2"/><path d="M8 3h11a2 2 0 0 1 2 2v13"/>',
+  retry: '<path d="M4 12a8 8 0 1 0 2.5-5.8M4 4v5h5"/>',
+};
+const ic = (name, cls = '') =>
+  `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+
+// 단어가 나오는 과/파트 표시
+const SEC_BY_ID = {};
+SECTIONS.forEach((sec) => { SEC_BY_ID[sec.id] = sec; });
+function secLabel(w) {
+  return w.secs.map((id) => SEC_BY_ID[id].full).filter((v, i, a) => a.indexOf(v) === i).join(' · ');
+}
+function lessonTag(w) {
+  const lessons = [...new Set(w.secs.map((id) => SEC_BY_ID[id].lesson))];
+  return `<span class="ltag" title="${esc(secLabel(w))}">${esc(lessons.join('·'))}</span>`;
+}
 
 function speak(text) {
   if (!('speechSynthesis' in window)) { toast('이 브라우저는 발음 듣기를 지원하지 않아요'); return; }
@@ -417,10 +526,13 @@ function renderQuestion() {
   const q = S.queue[S.idx];
   S.answered = false;
   $('#q-bar').style.width = (S.solved / S.total) * 100 + '%';
-  $('#q-combo').textContent = S.combo >= 3 ? `🔥${S.combo}` : '';
+  renderCombo();
   const promptCls = q.promptLang === 'ko' ? 'ko' : [...q.prompt].length > 5 ? 'long' : '';
   let html = `
-    <div class="q-type ${q.retry ? 'retry' : ''}">${q.retry ? '↻ 다시 한 번! · ' : ''}${TYPE_NAME[q.type]}</div>
+    <div class="q-meta">
+      <span class="lesson-pill">${esc(secLabel(q.w))}</span>
+      <span class="q-type ${q.retry ? 'retry' : ''}">${q.retry ? ic('retry') + '다시 한 번 · ' : ''}${TYPE_NAME[q.type]}</span>
+    </div>
     <div class="q-label">${esc(q.label)}</div>
     <div class="prompt"><div class="t ${promptCls}" ${q.promptLang === 'ja' ? 'lang="ja"' : ''}>${esc(q.prompt)}</div></div>`;
   if (q.mode === 'choice') {
@@ -447,7 +559,7 @@ function renderTiles() {
     area.innerHTML = `
       <input class="text-answer" id="typed" lang="ja" autocomplete="off" autocapitalize="off" spellcheck="false"
         placeholder="${KATA_RE.test(q.answer) ? 'カタカナ로 입력' : 'ひらがな로 입력'}" value="${esc(q.typed)}">
-      <button class="btn ghost small kbd-toggle" id="kbdToggle">🔤 글자 타일로 풀기</button>`;
+      <button class="btn ghost small kbd-toggle" id="kbdToggle">${ic('tiles')}글자 타일로 풀기</button>`;
     const inp = $('#typed');
     inp.addEventListener('input', () => { q.typed = inp.value; updateCheck(); });
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); onFootPrimary(); } });
@@ -459,16 +571,18 @@ function renderTiles() {
       <div class="tile-line" id="tileLine">${q.picked.map((id) => `<button class="tile" data-id="${id}">${esc(byId[id].ch)}</button>`).join('')}</div>
       <div class="bank">${q.tiles.map((t) => `<button class="tile ${pickedSet.has(t.id) ? 'used' : ''}" data-id="${t.id}">${esc(t.ch)}</button>`).join('')}</div>
       <div class="tile-hint">글자를 순서대로 눌러 단어를 만드세요 · 다시 누르면 빠져요</div>
-      <button class="btn ghost small kbd-toggle" id="kbdToggle">⌨️ 일본어 키보드로 입력</button>`;
+      <button class="btn ghost small kbd-toggle" id="kbdToggle">${ic('keyboard')}일본어 키보드로 입력</button>`;
     $$('#tileLine .tile').forEach((b) => b.addEventListener('click', () => {
       if (S.answered) return;
       q.picked = q.picked.filter((id) => id !== +b.dataset.id);
+      sfx('untap');
       renderTiles(); updateCheck();
     }));
     $$('.bank .tile').forEach((b) => b.addEventListener('click', () => {
       if (S.answered) return;
       const id = +b.dataset.id;
       if (!q.picked.includes(id)) q.picked.push(id);
+      sfx('tap');
       renderTiles(); updateCheck();
     }));
   }
@@ -482,6 +596,7 @@ function renderTiles() {
 function selectChoice(i) {
   if (S.answered) return;
   const q = S.queue[S.idx];
+  if (q.selected !== i) sfx('tap');
   q.selected = i;
   $$('.choice').forEach((b) => b.classList.toggle('sel', +b.dataset.i === i));
   updateCheck();
@@ -532,7 +647,8 @@ function submit(skipped) {
     S.maxCombo = Math.max(S.maxCombo, S.combo);
     if (first) S.firstRight++;
     S.xp += gained;
-    sfxRight();
+    sfx('right');
+    if (S.combo > 0 && S.combo % 5 === 0) sfx('combo');
   } else {
     S.combo = 0;
     S.wrongKeys.add(q.w.key);
@@ -540,7 +656,7 @@ function submit(skipped) {
     retry.retry = true;
     const pos = Math.min(S.queue.length, S.idx + 3 + Math.floor(Math.random() * 3));
     S.queue.splice(pos, 0, retry);
-    sfxWrong();
+    sfx('wrong');
   }
 
   // 정답 표시
@@ -563,7 +679,7 @@ function submit(skipped) {
   void main.offsetWidth;
   main.classList.add(ok ? 'pop' : 'shake');
   $('#q-bar').style.width = (S.solved / S.total) * 100 + '%';
-  $('#q-combo').textContent = S.combo >= 3 ? `🔥${S.combo}` : '';
+  renderCombo();
 
   const w = q.w;
   const praise = ['훌륭해요!', '정답!', '좋아요!', '완벽해요!', '대단해요!'];
@@ -571,24 +687,33 @@ function submit(skipped) {
   f.className = 'quiz-foot ' + (ok ? 'ok' : 'bad');
   f.innerHTML = `
     <div class="feedback">
-      <div class="fb-head"><span class="ico">${ok ? '✔️' : '✖️'}</span>${ok ? pick(praise) + (S.combo >= 3 ? ` 🔥${S.combo}연속` : '') : skipped ? '정답을 확인하세요' : '오답이에요'}</div>
+      <div class="fb-head"><span class="ico">${ic(ok ? 'check' : 'x')}</span>${ok ? pick(praise) + (S.combo >= 3 ? ` <small>${S.combo}연속 정답</small>` : '') : skipped ? '정답을 확인하세요' : '오답이에요'}</div>
       <div class="fb-ans">
         ${ok ? '' : '<div>정답:</div>'}
         <span class="big" lang="ja">${esc(w.jp)}</span>
         ${w.kana !== w.jp ? `<span lang="ja">【${esc(w.kana)}】</span>` : ''}
-        <button class="speak" id="fbSpeak" aria-label="발음 듣기">🔊</button>
+        <button class="speak" id="fbSpeak" aria-label="발음 듣기">${ic('speaker')}</button>
         <div>${esc(w.ko)}</div>
+        <div class="fb-src">${esc(secLabel(w))}</div>
       </div>
       <button class="btn ${ok ? 'primary' : 'red'}" id="nextBtn">계속</button>
     </div>`;
   $('#fbSpeak').addEventListener('click', () => speak(w.kana));
   $('#nextBtn').addEventListener('click', nextQuestion);
-  if (state.settings.tts) speak(w.kana);
+  // 효과음이 끝날 즈음 단어 읽어주기
+  if (state.settings.tts) { clearTimeout(speakTimer); speakTimer = setTimeout(() => speak(w.kana), state.settings.sfx ? 380 : 0); }
   $('#nextBtn').focus({ preventScroll: true });
+}
+
+let speakTimer = null;
+function renderCombo() {
+  $('#q-combo').innerHTML = S.combo >= 3 ? `${ic('flame')}${S.combo}` : '';
 }
 
 function nextQuestion() {
   if (!S) return;
+  clearTimeout(speakTimer);
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
   S.idx++;
   if (S.idx >= S.queue.length) finishQuiz();
   else renderQuestion();
@@ -632,26 +757,26 @@ function finishQuiz() {
   state.sessions.unshift({ ts: Date.now(), title: S.title, n: S.total, right: S.firstRight, xp: S.xp, secs });
   state.sessions = state.sessions.slice(0, 100);
   save();
-  sfxDone();
+  sfx('done');
   const wrongWords = [...S.wrongKeys].map((k) => WORD_BY_KEY[k]);
   const last = S;
   const d = today();
-  const emoji = acc === 100 ? '🏆' : acc >= 80 ? '🎉' : acc >= 50 ? '💪' : '📚';
+  const heading = acc === 100 ? '완벽해요!' : acc >= 80 ? '레슨 완료!' : acc >= 50 ? '잘했어요!' : '레슨 완료';
   const msg = acc === 100 ? '완벽해요! 전부 한 번에 맞혔어요' : acc >= 80 ? '아주 잘했어요!' : acc >= 50 ? '좋아요, 조금만 더!' : '틀린 단어는 오답노트에 모아 뒀어요';
   $('#result-body').innerHTML = `
     <div class="result-hero">
-      <div class="emoji">${emoji}</div>
-      <h2>레슨 완료!</h2>
+      <div class="hero-badge ${acc >= 80 ? '' : 'plain'}">${ic('star')}</div>
+      <h2>${heading}</h2>
       <p>${esc(last.title)} · ${esc(msg)}</p>
     </div>
     <div class="kpis">
-      <div class="kpi"><div class="h">획득 XP</div><div class="v">⚡${last.xp}</div></div>
-      <div class="kpi green"><div class="h">정확도</div><div class="v">🎯${acc}%</div></div>
-      <div class="kpi blue"><div class="h">시간</div><div class="v">⏱${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}</div></div>
+      <div class="kpi"><div class="h">획득 XP</div><div class="v">${last.xp}</div></div>
+      <div class="kpi green"><div class="h">정확도</div><div class="v">${acc}%</div></div>
+      <div class="kpi blue"><div class="h">시간</div><div class="v">${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}</div></div>
     </div>
-    <div class="card goal"><span>🎯 오늘 목표</span><div class="gbar"><i style="width:${Math.min(100, (d.xp / state.settings.goal) * 100)}%"></i></div><b>${d.xp}/${state.settings.goal} XP</b></div>
-    ${last.graduated.length ? `<div class="section-title">🎓 오답노트 졸업 (${last.graduated.length})</div>${wordList(last.graduated)}` : ''}
-    ${wrongWords.length ? `<div class="section-title">❌ 이번에 틀린 단어 (${wrongWords.length})</div>${wordList(wrongWords)}` : ''}
+    <div class="card goal"><span>오늘 목표</span><div class="gbar"><i style="width:${Math.min(100, (d.xp / state.settings.goal) * 100)}%"></i></div><b>${d.xp}/${state.settings.goal} XP</b></div>
+    ${last.graduated.length ? `<div class="section-title">오답노트 졸업 (${last.graduated.length})</div>${wordList(last.graduated)}` : ''}
+    ${wrongWords.length ? `<div class="section-title">이번에 틀린 단어 (${wrongWords.length})</div>${wordList(wrongWords)}` : ''}
     <div class="mt" style="display:grid;gap:10px;margin-top:20px">
       ${wrongWords.length ? `<button class="btn red" id="rRetryWrong">틀린 단어만 다시 풀기 (${wrongWords.length})</button>` : ''}
       <button class="btn primary" id="rAgain">같은 범위 한 번 더</button>
@@ -710,7 +835,7 @@ function renderFlash() {
     const n = F.unknown.size;
     $('#f-bar').style.width = '100%';
     $('#f-main').innerHTML = `
-      <div class="empty"><div class="e">🃏</div><b>카드 ${F.total}장 완료!</b>
+      <div class="empty"><b>카드 ${F.total}장 완료!</b>
       <p>${n ? `모르는 단어 ${n}개를 오답노트에 추가했어요.` : '전부 알고 있어요!'}</p></div>
       <div style="display:grid;gap:10px">
         ${n ? `<button class="btn red" id="fQuizUnknown">모르는 단어 퀴즈 풀기</button>` : ''}
@@ -727,10 +852,11 @@ function renderFlash() {
   const w = WORD_BY_KEY[F.queue[F.idx]];
   F.flipped = false;
   $('#f-bar').style.width = (F.idx / F.queue.length) * 100 + '%';
-  const front = flashKoFirst
+  const src = `<div class="fsrc">${esc(secLabel(w))}</div>`;
+  const front = src + (flashKoFirst
     ? `<div class="mid">${esc(w.ko)}</div>`
-    : `<div class="big" lang="ja">${esc(w.jp)}</div>`;
-  const back = `<div class="big" lang="ja">${esc(w.jp)}</div>
+    : `<div class="big" lang="ja">${esc(w.jp)}</div>`);
+  const back = src + `<div class="big" lang="ja">${esc(w.jp)}</div>
       ${w.kana !== w.jp ? `<div class="sub" lang="ja">${esc(w.kana)}</div>` : ''}
       <div class="mid">${esc(w.ko)}</div>`;
   $('#f-main').innerHTML = `
@@ -738,13 +864,13 @@ function renderFlash() {
     <button class="fcard" id="fcard" aria-label="카드 뒤집기">
       <div class="inner">
         <div class="face front">${front}<div class="hint">탭해서 뒤집기</div></div>
-        <div class="face back">${back}<div class="hint">🔊 발음은 아래 버튼</div></div>
+        <div class="face back">${back}<div class="hint">탭해서 다시 뒤집기</div></div>
       </div>
     </button>
-    <button class="btn ghost small" id="fSpeak" style="margin:0 auto">🔊 발음 듣기</button>
+    <button class="btn ghost small" id="fSpeak" style="margin:0 auto">${ic('speaker')}발음 듣기</button>
     <div class="row">
-      <button class="btn red" id="fNo">😵 몰라요</button>
-      <button class="btn primary" id="fYes">😎 알아요</button>
+      <button class="btn red" id="fNo">몰라요</button>
+      <button class="btn primary" id="fYes">알아요</button>
     </div>`;
   $('#fcard').addEventListener('click', flipCard);
   $('#fSpeak').addEventListener('click', () => speak(w.kana));
@@ -759,11 +885,13 @@ function startQuizReplace(keys, opts) {
 function flipCard() {
   if (!F || F.idx >= F.queue.length) return;
   F.flipped = !F.flipped;
+  sfx('flip');
   $('#fcard').classList.toggle('flipped', F.flipped);
 }
 function flashMark(known) {
   if (!F || F.idx >= F.queue.length) return;
   const k = F.queue[F.idx];
+  sfx(known ? 'right' : 'wrong');
   if (!known) {
     if (!F.unknown.has(k)) {
       F.unknown.add(k);
@@ -779,7 +907,7 @@ function flashMark(known) {
 $('#flashQuit').addEventListener('click', closeOverlay);
 $('#flashDir').addEventListener('click', () => {
   flashKoFirst = !flashKoFirst;
-  toast(flashKoFirst ? '앞면: 한국어 → 뒷면: 일본어' : '앞면: 일본어 → 뒷면: 뜻');
+  toast(flashKoFirst ? '앞면: 한국어 / 뒷면: 일본어' : '앞면: 일본어 / 뒷면: 뜻');
   if (F) renderFlash();
 });
 
@@ -798,12 +926,13 @@ function wordList(words, opt = {}) {
     return `
       <div class="witem" data-key="${esc(w.key)}">
         <div class="jp ${opt.hideJp ? 'hide-txt' : ''}"><b lang="ja">${esc(w.jp)}</b>${w.kana !== w.jp ? `<small lang="ja">${esc(w.kana)}</small>` : ''}</div>
+        <div class="src">${lessonTag(w)}</div>
         <div class="ko ${opt.hideKo ? 'hide-txt' : ''}">${esc(w.ko)}</div>
         <div class="side">
-          ${opt.wrongMode && wn ? `<span class="fix">복습 <b>${'✔'.repeat(wn.fix || 0)}</b>${'·'.repeat(2 - (wn.fix || 0))}</span>` : dots(w.key)}
-          ${s && s.w ? `<span class="wcount">✖${s.w}</span>` : ''}
+          ${opt.wrongMode && wn ? `<span class="fix">복습 <b>${wn.fix || 0}</b>/2</span>` : dots(w.key)}
+          ${s && s.w ? `<span class="wcount">틀림 ${s.w}</span>` : ''}
         </div>
-        ${opt.del ? `<button class="del" data-del="${esc(w.key)}" aria-label="오답노트에서 빼기">✕</button>` : ''}
+        ${opt.del ? `<button class="del" data-del="${esc(w.key)}" aria-label="오답노트에서 빼기">${ic('close')}</button>` : ''}
       </div>`;
   }).join('')}</div>`;
 }
@@ -818,7 +947,7 @@ function bindWordList(root) {
 /* ============================================================
  * 탭 렌더링
  * ============================================================ */
-const BADGES = ['💬', '📝', '✏️'];
+const BADGES = ['회화', '문법', '연습'];
 function examInfo() {
   const [y, m, d] = EXAM_DATE.split('-').map(Number);
   const exam = new Date(y, m - 1, d);
@@ -839,29 +968,29 @@ const RENDER = {
     const learned = ALL_KEYS.filter((k) => lv(k) >= 3).length;
     let html = `
       <div class="card exam-card">
-        <div class="dday">${dday ? `${dday} 🗓️` : '단어퀴즈 📚'}</div>
+        <div class="dday">${dday || '단어퀴즈'}</div>
         <div class="meta">9월 29일(화) 단어퀴즈 · 범위 1–2과 단어 (${ALL_KEYS.length}개)</div>
-        <div class="tags"><span>한자 읽기</span><span>한국어 의미</span><span>한국어→일본어</span><span>가타카나 쓰기 ✔</span></div>
-        <button class="btn" id="examBtn">🚀 시험 대비 퀴즈 시작</button>
+        <div class="tags"><span>한자 읽기</span><span>한국어 의미</span><span>한국어→일본어</span><span>가타카나 쓰기</span></div>
+        <button class="btn" id="examBtn">시험 대비 퀴즈 시작</button>
       </div>
-      <div class="card goal"><span>🎯</span><div class="gbar"><i style="width:${Math.min(100, (d.xp / state.settings.goal) * 100)}%"></i></div><b>${d.xp}/${state.settings.goal} XP</b></div>
+      <div class="card goal"><span>오늘</span><div class="gbar"><i style="width:${Math.min(100, (d.xp / state.settings.goal) * 100)}%"></i></div><b>${d.xp}/${state.settings.goal} XP</b></div>
       <div class="note" style="margin:-4px 4px 0">외운 단어 ${learned}/${ALL_KEYS.length} · 오늘 ${d.q}문제</div>
 
       <div class="section-title">집중 연습</div>
       <div class="drill-grid">
-        <button class="drill" data-drill="read"><span class="e">🈶</span><b>한자 읽기</b><small>漢字→かな</small></button>
-        <button class="drill" data-drill="meaning"><span class="e">🇰🇷</span><b>뜻 맞히기</b><small>日本語→한국어</small></button>
-        <button class="drill" data-drill="kata"><span class="e">✍️</span><b>가타카나 쓰기</b><small>한국어→カナ</small></button>
+        <button class="drill" data-drill="read"><span class="e" lang="ja">漢</span><b>한자 읽기</b><small>漢字→かな</small></button>
+        <button class="drill" data-drill="meaning"><span class="e">뜻</span><b>뜻 맞히기</b><small>日本語→한국어</small></button>
+        <button class="drill" data-drill="kata"><span class="e" lang="ja">カ</span><b>가타카나 쓰기</b><small>한국어→カナ</small></button>
       </div>
 
       <div class="section-title">복습</div>
       <button class="unit" id="wrongUnit">
-        <span class="badge b5">📕</span>
+        <span class="badge b5">${ic('wrong')}</span>
         <span class="info"><b>오답노트 복습</b><small>${wrongN ? `틀린 단어 ${wrongN}개가 기다려요` : '아직 틀린 단어가 없어요'}</small></span>
         <span class="go">›</span>
       </button>
       <button class="unit" id="flashAll">
-        <span class="badge b2">🃏</span>
+        <span class="badge b2">${ic('cards')}</span>
         <span class="info"><b>플래시카드로 외우기</b><small>1–2과 전체 단어를 카드로 넘겨보기</small></span>
         <span class="go">›</span>
       </button>`;
@@ -872,7 +1001,7 @@ const RENDER = {
         const m = mastery(s.keys);
         html += `
           <button class="unit" data-sec="${s.id}">
-            <span class="badge ${m >= 80 ? 'gold' : 'b' + (i + 1)}">${m >= 80 ? '👑' : BADGES[i]}</span>
+            <span class="badge ${m >= 80 ? 'gold' : 'b' + (i + 1)}">${m >= 80 ? ic('star') : BADGES[i]}</span>
             <span class="info"><b>${esc(s.title)}</b><small>${s.keys.length}단어 · 숙련도 ${m}%</small><span class="mini-bar"><i style="width:${m}%"></i></span></span>
             <span class="go">›</span>
           </button>`;
@@ -906,25 +1035,25 @@ const RENDER = {
       .sort((a, b) => (state.wrong[b].n || 0) - (state.wrong[a].n || 0) || state.wrong[b].added - state.wrong[a].added);
     const body = $('#wrong-body');
     if (!keys.length) {
-      body.innerHTML = `<div class="empty"><div class="e">✨</div><b>오답노트가 비어 있어요</b><p>퀴즈에서 틀리거나 플래시카드에서 “몰라요”를 누른 단어가 여기에 모여요.</p></div>
+      body.innerHTML = `<div class="empty"><b>오답노트가 비어 있어요</b><p>퀴즈에서 틀리거나 플래시카드에서 “몰라요”를 누른 단어가 여기에 모여요.</p></div>
         <button class="btn primary" id="wGo">퀴즈 풀러 가기</button>`;
       $('#wGo').addEventListener('click', () => show('home'));
       return;
     }
     body.innerHTML = `
       <div class="card" style="text-align:center">
-        <div style="font-size:40px">📕</div>
+        <div class="wrong-ico">${ic('wrong')}</div>
         <b style="font-size:20px">틀린 단어 ${keys.length}개</b>
-        <p class="note" style="margin:4px 0 14px">복습 퀴즈에서 <b>서로 다른 세션에서 2번</b> 한 번에 맞히면 졸업해요 (✔✔)</p>
+        <p class="note" style="margin:4px 0 14px">복습 퀴즈에서 <b>서로 다른 세션에서 2번</b> 한 번에 맞히면 졸업해요</p>
         <div style="display:grid;gap:10px">
           <button class="btn red" id="wStart">오답 복습 시작 (${Math.min(keys.length, 20)}문제)</button>
           <div class="row">
             <button class="btn" id="wAll">전부 풀기</button>
-            <button class="btn" id="wFlash">🃏 카드로 보기</button>
+            <button class="btn" id="wFlash">카드로 보기</button>
           </div>
         </div>
       </div>
-      <div class="toolbar"><button class="btn small ghost" id="wClear">🗑 오답노트 비우기</button></div>
+      <div class="toolbar"><button class="btn small ghost" id="wClear">오답노트 비우기</button></div>
       ${wordList(keys.map((k) => WORD_BY_KEY[k]), { del: true, wrongMode: true })}`;
     bindWordList(body);
     $('#wStart').addEventListener('click', startWrongReview);
@@ -947,15 +1076,15 @@ const RENDER = {
     const chips = [{ id: 'all', t: '전체' }, ...SECTIONS.map((s) => ({ id: s.id, t: s.full }))];
     body.innerHTML = `
       <div class="chips">${chips.map((c) => `<button class="chip ${f.sec === c.id ? 'on' : ''}" data-chip="${c.id}">${esc(c.t)}</button>`).join('')}</div>
-      <input class="search" id="wSearch" type="search" placeholder="🔍 검색 (일본어/한국어)" value="${esc(f.q)}">
+      <input class="search" id="wSearch" type="search" placeholder="검색 (일본어/한국어)" value="${esc(f.q)}">
       <div class="toolbar">
         <button class="btn small ${f.hideKo ? 'blue' : ''}" id="tKo">${f.hideKo ? '뜻 보이기' : '뜻 가리기'}</button>
-        <button class="btn small ${f.hideJp ? 'blue' : ''}" id="tJp">${f.hideJp ? '일본어 보이기' : '일본어 가리기'}</button>
-        <button class="btn small ${f.sort === 'weak' ? 'blue' : ''}" id="tSort">${f.sort === 'weak' ? '약한 순 ✓' : '약한 순'}</button>
+        <button class="btn small ${f.hideJp ? 'blue' : ''}" id="tJp">${f.hideJp ? '단어 보이기' : '단어 가리기'}</button>
+        <button class="btn small ${f.sort === 'weak' ? 'blue' : ''}" id="tSort">${f.sort === 'weak' ? '약한 순 (켜짐)' : '약한 순'}</button>
       </div>
       <div class="row" style="margin-bottom:14px">
         <button class="btn primary" id="wQuiz">이 범위 퀴즈</button>
-        <button class="btn blue" id="wCards">🃏 플래시카드</button>
+        <button class="btn blue" id="wCards">플래시카드</button>
       </div>
       <div id="wListWrap"></div>`;
     const title = () => (f.sec === 'all' ? '1–2과 전체' : SECTIONS.find((x) => x.id === f.sec).full);
@@ -1009,12 +1138,12 @@ const RENDER = {
 
     body.innerHTML = `
       <div class="tiles">
-        <div class="stat-tile"><span class="e">🔥</span><div><b>${streak()}일</b><small>연속 학습</small></div></div>
-        <div class="stat-tile"><span class="e">⚡</span><div><b>${state.xp}</b><small>총 XP</small></div></div>
-        <div class="stat-tile"><span class="e">✅</span><div><b>${totalQ ? Math.round((totalC / totalQ) * 100) : 0}%</b><small>정답률 (${totalC}/${totalQ})</small></div></div>
-        <div class="stat-tile"><span class="e">👑</span><div><b>${mastered}/${ALL_KEYS.length}</b><small>마스터한 단어</small></div></div>
-        <div class="stat-tile"><span class="e">👀</span><div><b>${seen}/${ALL_KEYS.length}</b><small>풀어 본 단어</small></div></div>
-        <div class="stat-tile"><span class="e">⏱</span><div><b>${Math.round(totalT / 60)}분</b><small>총 학습 시간 · ${days.length}일</small></div></div>
+        <div class="stat-tile"><div><b>${streak()}일</b><small>연속 학습</small></div></div>
+        <div class="stat-tile"><div><b>${state.xp}</b><small>총 XP</small></div></div>
+        <div class="stat-tile"><div><b>${totalQ ? Math.round((totalC / totalQ) * 100) : 0}%</b><small>정답률 (${totalC}/${totalQ})</small></div></div>
+        <div class="stat-tile"><div><b>${mastered}/${ALL_KEYS.length}</b><small>마스터한 단어</small></div></div>
+        <div class="stat-tile"><div><b>${seen}/${ALL_KEYS.length}</b><small>풀어 본 단어</small></div></div>
+        <div class="stat-tile"><div><b>${Math.round(totalT / 60)}분</b><small>총 학습 시간 · ${days.length}일</small></div></div>
       </div>
 
       <div class="card">
@@ -1034,20 +1163,20 @@ const RENDER = {
         <p class="note">숙련도: 한 번에 맞히면 +1칸, 틀리면 −2칸 (단어당 최대 5칸)</p>
       </div>
 
-      ${weak.length ? `<div class="section-title">😵 자주 틀린 단어 TOP ${weak.length}</div>${wordList(weak)}
+      ${weak.length ? `<div class="section-title">자주 틀린 단어 TOP ${weak.length}</div>${wordList(weak)}
         <button class="btn red mt" id="sWeak">자주 틀린 단어 퀴즈</button>` : ''}
 
       ${state.sessions.length ? `<div class="section-title">최근 학습</div><div class="card">${state.sessions.slice(0, 10).map((s) => {
         const d = new Date(s.ts);
-        return `<div class="hist-item"><div>${esc(s.title)}<br><span>${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}</span></div><div style="text-align:right">${s.right}/${s.n}<br><span>⚡${s.xp}</span></div></div>`;
+        return `<div class="hist-item"><div>${esc(s.title)}<br><span>${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}</span></div><div style="text-align:right">${s.right}/${s.n}<br><span>${s.xp} XP</span></div></div>`;
       }).join('')}</div>` : ''}
 
       <div class="section-title">백업</div>
       <div class="card">
         <p class="note" style="margin-top:0">기록은 이 브라우저에만 저장돼요. 브라우저 데이터를 지우면 사라지니 가끔 백업하세요.</p>
         <div class="row">
-          <button class="btn small" id="bExport">⬇️ 백업 저장</button>
-          <button class="btn small" id="bImport">⬆️ 불러오기</button>
+          <button class="btn small" id="bExport">백업 저장</button>
+          <button class="btn small" id="bImport">불러오기</button>
         </div>
         <input type="file" id="bFile" accept="application/json,.json" hidden>
         <button class="btn small ghost mt" id="bReset" style="width:100%;color:var(--red)">기록 전체 초기화</button>
@@ -1073,7 +1202,7 @@ const wordsFilter = { sec: 'all', q: '', hideKo: false, hideJp: false, sort: '' 
 
 function startWrongReview() {
   const keys = Object.keys(state.wrong).filter((k) => WORD_BY_KEY[k]);
-  if (!keys.length) { toast('오답노트가 비어 있어요 👍'); return; }
+  if (!keys.length) { toast('오답노트가 비어 있어요'); return; }
   startQuiz(keys, { title: '오답노트 복습', len: 20, keys });
 }
 
@@ -1134,7 +1263,7 @@ function renderSettings() {
     <div class="set-group"><b>소리</b>
       <div class="seg">
         <button data-toggle="sfx" class="${s.sfx ? 'on' : ''}">효과음 ${s.sfx ? 'ON' : 'OFF'}</button>
-        <button data-toggle="tts" class="${s.tts ? 'on' : ''}">정답 발음 자동 ${s.tts ? 'ON' : 'OFF'}</button>
+        <button data-toggle="tts" class="${s.tts ? 'on' : ''}">답하면 단어 읽기 ${s.tts ? 'ON' : 'OFF'}</button>
       </div>
     </div>`;
   $$('[data-type]', $('#settings-body')).forEach((b) => b.addEventListener('click', () => {
@@ -1161,6 +1290,7 @@ $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') { $(
 /* ============================================================
  * 시작
  * ============================================================ */
+$$('[data-ic]').forEach((el) => { el.outerHTML = ic(el.dataset.ic); });
 if ('speechSynthesis' in window) speechSynthesis.getVoices();
 show('home');
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
