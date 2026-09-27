@@ -122,6 +122,50 @@ function mastery(keys) {
 /* ============================================================
  * 문제 생성
  * ============================================================ */
+const DAKU = {};
+['かが', 'きぎ', 'くぐ', 'けげ', 'こご', 'さざ', 'しじ', 'すず', 'せぜ', 'そぞ', 'ただ', 'てで', 'とど', 'はばぱ', 'ひびぴ', 'ふぶぷ', 'へべぺ', 'ほぼぽ']
+  .forEach((g) => [...g].forEach((c) => { DAKU[c] = [...g].filter((x) => x !== c); }));
+const SIZE = {};
+['やゃ', 'ゆゅ', 'よょ', 'つっ'].forEach(([a, b]) => { SIZE[a] = b; SIZE[b] = a; });
+const CONFUSE = {
+  シ: 'ツソ', ツ: 'シソ', ソ: 'ンツ', ン: 'ソシ', ク: 'タケ', タ: 'クヌ', ワ: 'ウフ', ウ: 'ワ', ル: 'レ', レ: 'ル',
+  チ: 'テ', テ: 'チ', ヌ: 'スメ', ス: 'ヌ', コ: 'ユロ', ユ: 'コ', ロ: 'コ', メ: 'ナヌ', ナ: 'メ', マ: 'ア', ア: 'マ',
+  フ: 'ワ', ケ: 'ク', ヲ: 'ラ', ラ: 'ヲ', ホ: 'ポ', ハ: 'バ', ト: 'ド', イ: 'ィ', ー: 'ッ',
+  ぬ: 'め', め: 'ぬ', わ: 'ね', ね: 'れわ', れ: 'ね', る: 'ろ', ろ: 'る', は: 'ほ', ほ: 'は', さ: 'ち', ち: 'さ',
+  き: 'さ', あ: 'お', お: 'あ', い: 'り', り: 'い', こ: 'に', に: 'こ', う: 'つ', し: 'つ', ま: 'も', も: 'ま',
+};
+const HIRA_POOL = [...'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわんがぎぐげござじずぜぞだでどばびぶべぼぱぴぷぺぽっゃゅょ'];
+const KATA_POOL = [...toKata(HIRA_POOL.join('')), 'ー'];
+
+function tileBank(answer) {
+  const chars = [...answer];
+  const cands = [];
+  chars.forEach((c) => {
+    const hc = toHira(c);
+    const back = (x) => (KATA_RE.test(c) ? toKata(x) : x);
+    [...(CONFUSE[c] || '')].forEach((x) => cands.push(x));
+    (DAKU[hc] || []).forEach((x) => cands.push(back(x)));
+    if (SIZE[hc]) cands.push(back(SIZE[hc]));
+  });
+  const kataAns = KATA_RE.test(answer);
+  if (kataAns && !chars.includes('ー')) cands.push('ー', 'ー');
+  if (!kataAns && !chars.includes('う')) cands.push('う');
+  const nDis = Math.min(7, Math.max(3, Math.round(chars.length * 0.7)));
+  const exclude = new Set(chars);
+  const dis = [];
+  for (const x of shuffle(cands)) {
+    if (dis.length >= nDis) break;
+    if (!exclude.has(x) && !dis.includes(x)) dis.push(x);
+  }
+  const pool = kataAns ? KATA_POOL : HIRA_POOL;
+  let guard = 0;
+  while (dis.length < nDis && guard++ < 200) {
+    const x = pick(pool);
+    if (!exclude.has(x) && !dis.includes(x)) dis.push(x);
+  }
+  return shuffle([...chars, ...dis]).map((ch, id) => ({ id, ch }));
+}
+
 // 로마자 → 가나 변환 (일본어 키보드가 없어도 영어 자판으로 입력: hokkaidou → ほっかいどう)
 const ROMA = {};
 (() => {
@@ -211,7 +255,7 @@ function chooseType(w, forced) {
 function makeQuestion(w, type) {
   // 가타카나만으로 된 답이면 가타카나로, 그 외엔 히라가나로 자동 변환
   const kata = KATA_RE.test(w.answer) && !/[\u3041-\u3096]/.test(w.answer);
-  const q = { w, type, answer: w.answer, mode: 'text', kata };
+  const q = { w, type, answer: w.answer, mode: 'tiles', kata, tiles: tileBank(w.answer), picked: [] };
   if (type === 'read') {
     q.prompt = w.jp; q.promptLang = 'ja';
     q.label = KATA_RE.test(w.answer) ? '읽는 법을 쓰세요' : '읽는 법을 히라가나로 쓰세요';
@@ -303,6 +347,13 @@ const SFX = {
     seq.forEach(([f, at]) => tone(f, at, 0.3, { type: 'triangle', partials: [[1, 1], [2, 0.25]], gain: 0.18 }));
     [1046.5, 1318.5, 1568].forEach((f) => tone(f, 0.55, 1.1, { partials: BELL, gain: 0.12 }));
   },
+  // 글자 타일 누를 때 "톡"
+  tap() {
+    tone(1400, 0, 0.06, { type: 'triangle', gain: 0.07, slide: 0.6 });
+  },
+  untap() {
+    tone(900, 0, 0.06, { type: 'triangle', gain: 0.06, slide: 0.7 });
+  },
   flip() {
     tone(600, 0, 0.12, { type: 'sine', gain: 0.06, slide: 1.8 });
   },
@@ -329,6 +380,8 @@ const ICONS = {
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   speaker: '<path fill="currentColor" d="M11 5 6.5 9H3.5v6h3L11 19z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',
+  keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h1M10.5 10h1M14.5 10h1M7.5 14h9"/>',
+  tiles: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
   star: '<path fill="currentColor" stroke="none" d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/>',
   cards: '<rect x="3" y="6" width="13" height="15" rx="2"/><path d="M8 3h11a2 2 0 0 1 2 2v13"/>',
   retry: '<path d="M4 12a8 8 0 1 0 2.5-5.8M4 4v5h5"/>',
@@ -456,20 +509,74 @@ function renderQuestion() {
     </div>
     <div class="q-label">${esc(q.label)}</div>
     <div class="prompt"><div class="t ${promptCls}" ${q.promptLang === 'ja' ? 'lang="ja"' : ''}>${esc(q.prompt)}</div></div>`;
-  html += `
-    <input class="text-answer" id="typed" lang="ja" type="text" inputmode="text" enterkeyhint="done"
-      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-      placeholder="${q.kata ? '예) arubaito → アルバイト' : '예) hokkaidou → ほっかいどう'}">
-    <div class="conv-preview" id="convPreview" lang="ja"></div>
-    <div class="type-hint">
-      영어 자판으로 로마자를 치면 ${q.kata ? '<b>가타카나</b>' : '<b>히라가나</b>'}로 바뀌어요 (일본어 키보드도 OK)<br>
-      ん = <b>nn</b> · 촉음 っ = 자음 두 번 (<b>tt</b>) · 장음 ー = <b>-</b>${q.kata ? ' · ティ = <b>thi</b> · フィ = <b>fi</b> · ウェ = <b>we</b>' : ' · を = <b>wo</b>'}
-    </div>`;
+  html += `<div id="tileArea"></div>`;
   $('#q-main').innerHTML = html;
   $('#q-main').scrollTop = 0;
-  bindTyping(q);
+  renderTiles();
   renderFootAsk();
   persistQuiz();
+}
+
+function renderTiles() {
+  const q = S.queue[S.idx];
+  const area = $('#tileArea');
+  if (q.kbd) {
+    area.innerHTML = `
+      <input class="text-answer" id="typed" lang="ja" type="text" inputmode="text" enterkeyhint="done"
+        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+        placeholder="${q.kata ? '예) arubaito → アルバイト' : '예) hokkaidou → ほっかいどう'}">
+      <div class="conv-preview" id="convPreview" lang="ja"></div>
+      <div class="type-hint">
+        영어 자판으로 로마자를 치면 ${q.kata ? '<b>가타카나</b>' : '<b>히라가나</b>'}로 바뀌어요 (일본어 키보드도 OK)<br>
+        ん = <b>nn</b> · 촉음 っ = 자음 두 번 (<b>tt</b>) · 장음 ー = <b>-</b>${q.kata ? ' · ティ = <b>thi</b> · フィ = <b>fi</b> · ウェ = <b>we</b>' : ' · を = <b>wo</b>'}
+      </div>
+      <button class="btn ghost small kbd-toggle" id="kbdToggle">${ic('tiles')}글자 타일로 풀기</button>`;
+    $('#typed').value = q.typed || '';
+    bindTyping(q);
+  } else {
+    const pickedSet = new Set(q.picked);
+    const byId = Object.fromEntries(q.tiles.map((t) => [t.id, t]));
+    area.innerHTML = `
+      <div class="tile-line" id="tileLine">${q.picked.map((id) => `<button class="tile" data-id="${id}">${esc(byId[id].ch)}</button>`).join('')}</div>
+      <div class="bank">${q.tiles.map((t) => `<button class="tile ${pickedSet.has(t.id) ? 'used' : ''}" data-id="${t.id}">${esc(t.ch)}</button>`).join('')}</div>
+      <div class="tile-hint">글자를 순서대로 눌러 단어를 만드세요 · 다시 누르면 빠져요</div>
+      <button class="btn ghost small kbd-toggle" id="kbdToggle">${ic('keyboard')}키보드로 입력 (로마자 가능)</button>`;
+    reserveLine(q);
+    $$('#tileLine .tile').forEach((b) => b.addEventListener('click', () => {
+      if (S.answered) return;
+      q.picked = q.picked.filter((id) => id !== +b.dataset.id);
+      sfx('untap');
+      renderTiles(); updateCheck();
+    }));
+    $$('.bank .tile').forEach((b) => b.addEventListener('click', () => {
+      if (S.answered) return;
+      const id = +b.dataset.id;
+      if (!q.picked.includes(id)) q.picked.push(id);
+      sfx('tap');
+      renderTiles(); updateCheck();
+    }));
+  }
+  $('#kbdToggle').addEventListener('click', () => {
+    if (S.answered) return;
+    q.kbd = !q.kbd;
+    renderTiles(); updateCheck();
+  });
+}
+
+// 답 칸 높이를 정답 글자 수만큼 미리 확보 → 타일을 눌러도 칸이 늘어나 아래가 밀리지 않음
+function reserveLine(q) {
+  const line = $('#tileLine');
+  const sample = $('.bank .tile');
+  if (!line || !sample) return;
+  const cs = getComputedStyle(line);
+  const gap = parseFloat(cs.columnGap) || 6;
+  const rowGap = parseFloat(cs.rowGap) || gap;
+  const tw = sample.offsetWidth;
+  const th = sample.offsetHeight;
+  const perRow = Math.max(1, Math.floor((line.clientWidth + gap) / (tw + gap)));
+  const rows = Math.max(1, Math.ceil(Math.max([...q.answer].length, q.picked.length) / perRow));
+  const extra = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + parseFloat(cs.borderBottomWidth);
+  line.style.minHeight = extra + rows * th + (rows - 1) * rowGap + 'px';
 }
 
 function bindTyping(q) {
@@ -498,6 +605,10 @@ function bindTyping(q) {
 }
 
 function userAnswer(q) {
+  if (!q.kbd) {
+    const byId = Object.fromEntries(q.tiles.map((t) => [t.id, t.ch]));
+    return q.picked.map((id) => byId[id]).join('');
+  }
   const v = (q.typed || '').normalize('NFKC').replace(/\s+/g, '');
   return stripTilde(romaToKana(v, q.kata, true));
 }
@@ -562,10 +673,14 @@ function submit(skipped) {
 
   // 정답 표시
   const inp = $('#typed');
-  inp.value = mine;
-  inp.readOnly = true;
-  inp.classList.add(ok ? 'right' : 'wrong');
-  $('#convPreview').textContent = '';
+  if (inp) {
+    inp.value = mine;
+    inp.readOnly = true;
+    inp.classList.add(ok ? 'right' : 'wrong');
+    $('#convPreview').textContent = '';
+  }
+  const line = $('#tileLine');
+  if (line) line.classList.add(ok ? 'right' : 'wrong');
   const main = $('#q-main');
   main.classList.remove('shake', 'pop');
   void main.offsetWidth;
@@ -596,7 +711,7 @@ function submit(skipped) {
   // 패널이 문제를 가리지 않게: 패널 높이만큼 아래 여백을 주고, 정답 표시 부분이 보이게 스크롤
   const sheetH = $('#fbSheet').offsetHeight;
   main.style.paddingBottom = sheetH + 16 + 'px';
-  const focusEl = $('#typed', main);
+  const focusEl = $('#tileLine', main) || $('#typed', main);
   if (focusEl) {
     const mr = main.getBoundingClientRect();
     const er = focusEl.getBoundingClientRect();
@@ -789,6 +904,7 @@ document.addEventListener('keydown', (e) => {
     const q = S.queue[S.idx];
     if (e.target && e.target.id === 'typed') return;
     if (e.key === 'Enter') { e.preventDefault(); onFootPrimary(); return; }
+    if (!S.answered && !q.kbd && e.key === 'Backspace') { q.picked.pop(); renderTiles(); updateCheck(); }
   } else if (currentView === 'flash' && F) {
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flipCard(); }
     if (e.key === 'ArrowLeft') flashMark(false);

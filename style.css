@@ -282,6 +282,34 @@ h1, h2, h3 { margin: 0; }
 .prompt .t.ko { font-size: 30px; }
 .prompt .t.long { font-size: 30px; }
 
+.tile-line {
+  min-height: 68px;
+  border-bottom: 2px solid var(--line);
+  display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px;
+  padding: 6px 0 12px;
+  margin-bottom: 18px;
+}
+.tile-line.right { border-color: var(--green); }
+.tile-line.wrong { border-color: var(--red); }
+.bank { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+/* 입체감은 그림자로 → 눌러도 타일 크기가 안 바뀜 */
+.tile {
+  min-width: 46px; height: 48px; padding: 0 10px; margin: 0;
+  border: 2px solid var(--line); border-radius: 12px;
+  box-shadow: 0 3px 0 var(--line);
+  background: var(--card); color: var(--text);
+  font-family: var(--font-ja); font-size: 24px; font-weight: 600; line-height: 1;
+  display: grid; place-items: center;
+  transition: transform .05s;
+  touch-action: manipulation;
+}
+.tile:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--line); }
+.tile.used {
+  background: var(--line); border-color: var(--line); box-shadow: 0 3px 0 transparent; color: transparent;
+  pointer-events: none;
+}
+.tile-hint { text-align: center; color: var(--muted); font-size: 13px; margin-top: 14px; }
+.kbd-toggle { margin: 12px auto 0; }
 .text-answer {
   width: 100%; font-size: 26px; font-weight: 600; padding: 14px 16px;
   border: 2px solid var(--line); border-bottom-width: 4px; border-radius: 14px;
@@ -508,6 +536,10 @@ h1, h2, h3 { margin: 0; }
   .prompt { min-height: 76px; margin-bottom: 12px; }
   .prompt .t { font-size: 34px; }
   .prompt .t.ko, .prompt .t.long { font-size: 26px; }
+  .tile { min-width: 42px; height: 44px; font-size: 21px; }
+  .tile-line { min-height: 64px; margin-bottom: 12px; }
+  .tile-hint { display: none; }
+  .kbd-toggle { margin-top: 8px; }
   .text-answer { font-size: 22px; padding: 10px 14px; }
   .conv-preview { min-height: 26px; font-size: 19px; }
   .quiz-foot { padding-top: 10px; padding-bottom: calc(10px + var(--safe-b)); }
