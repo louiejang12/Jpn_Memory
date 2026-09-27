@@ -86,13 +86,8 @@ function load() {
   s.settings.types = Object.assign({}, DEFAULT_SETTINGS.types, s.settings.types || {});
   // v2: 답하면 단어 읽어주기를 기본으로 켬
   if (!s.settings.v2) { s.settings.tts = true; s.settings.v2 = true; }
-  // v3: 홈 화면에 설치한 앱으로 열었으면 전체 화면(아래 검은 내비게이션 바 숨김)을 기본으로 켬
-  if (!s.settings.v3) {
-    s.settings.full = !!(window.matchMedia && matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches);
-    s.settings.v3 = true;
-  }
-  // v4: 전체 화면 기본값은 다시 끔 (내비게이션 바는 보이게, 원하면 설정에서 켜기)
-  if (!s.settings.v4) { s.settings.full = false; s.settings.v4 = true; }
+  // v6: 전체 화면은 자동으로 켜지지 않게 (기본은 일반 화면, 원하면 설정에서 직접 켜기)
+  if (!s.settings.v6) { s.settings.full = false; s.settings.v6 = true; }
   // v5: 뜻 맞히기(객관식) 제거
   delete s.settings.types.meaning;
   delete s.settings.write;
@@ -486,8 +481,9 @@ function startQuiz(keys, opts = {}) {
     const w = WORD_BY_KEY[k];
     return makeQuestion(w, chooseType(w, forced));
   });
+  closeAct();
   S = {
-    title: opts.title || '연습', opts, srcKeys, queue, idx: 0, total: queue.length, solved: 0,
+    scope: quizScope(opts.title || '연습'), title: opts.title || '연습', opts, srcKeys, queue, idx: 0, total: queue.length, solved: 0,
     firstRight: 0, xp: 0, combo: 0, maxCombo: 0, start: Date.now(), timeSaved: 0,
     wrongKeys: new Set(), graduated: [], answered: false,
   };
@@ -775,28 +771,52 @@ function saveSessionTime() {
 /* ------------------------------------------------------------
  * 이어서 하기: 진행 중인 퀴즈/플래시카드를 저장해 두고 다시 불러오기
  * ------------------------------------------------------------ */
+// 범위(퀴즈 제목)마다 따로 저장 → 다른 범위를 열어도 저장된 진행 상황이 안 지워짐
 const RESUME_KEY = 'jpvocab.resume';
-function writeResume(data) {
-  try { localStorage.setItem(RESUME_KEY, JSON.stringify(data)); } catch (e) { /* 무시 */ }
-}
-function clearResume() {
-  try { localStorage.removeItem(RESUME_KEY); } catch (e) { /* 무시 */ }
-}
-function loadResume() {
+function readResumes() {
   try {
-    const r = JSON.parse(localStorage.getItem(RESUME_KEY));
-    if (!r || !Array.isArray(r.queue)) return null;
-    const keys = r.kind === 'quiz' ? r.queue.map((q) => q.key) : r.queue;
-    if (!keys.length || !keys.every((k) => WORD_BY_KEY[k])) return null;
-    return r;
+    let m = JSON.parse(localStorage.getItem(RESUME_KEY));
+    if (!m || typeof m !== 'object') return {};
+    if (m.kind) m = { [(m.kind === 'quiz' ? 'q:' : 'f:') + m.title]: m };   // 예전 형식(한 칸) 변환
+    return m;
   } catch (e) {
-    return null;
+    return {};
   }
 }
+function writeResumes(m) {
+  try { localStorage.setItem(RESUME_KEY, JSON.stringify(m)); } catch (e) { /* 무시 */ }
+}
+function writeResume(data) {
+  const m = readResumes();
+  m[data.scope] = data;
+  writeResumes(m);
+}
+function clearResume(scope) {
+  const m = readResumes();
+  delete m[scope];
+  writeResumes(m);
+}
+function validResume(r) {
+  if (!r || !Array.isArray(r.queue)) return false;
+  const keys = r.kind === 'quiz' ? r.queue.map((q) => q.key) : r.queue;
+  return keys.length > 0 && keys.every((k) => WORD_BY_KEY[k]);
+}
+function allResumes() {
+  return Object.entries(readResumes())
+    .map(([scope, r]) => Object.assign(r, { scope }))
+    .filter(validResume)
+    .sort((a, b) => b.saved - a.saved);
+}
+function loadResume(scope) {
+  const r = readResumes()[scope];
+  return validResume(r) ? Object.assign(r, { scope }) : null;
+}
+const quizScope = (title) => 'q:' + title;
+const flashScope = (title) => 'f:' + title;
 function persistQuiz() {
   if (!S) return;
   writeResume({
-    kind: 'quiz', saved: Date.now(),
+    kind: 'quiz', saved: Date.now(), scope: S.scope,
     title: S.title, opts: S.opts, srcKeys: S.srcKeys,
     // 답을 확인한 뒤 나갔으면 다음 문제부터
     idx: S.answered ? S.idx + 1 : S.idx,
@@ -808,8 +828,9 @@ function persistQuiz() {
   });
 }
 function resumeQuiz(r) {
+  closeAct();
   S = {
-    title: r.title, opts: r.opts || {}, srcKeys: r.srcKeys || [],
+    scope: r.scope, title: r.title, opts: r.opts || {}, srcKeys: r.srcKeys || [],
     queue: r.queue.map((q) => Object.assign(makeQuestion(WORD_BY_KEY[q.key], q.type === 'read' ? 'read' : 'toJp'), { retry: !!q.retry })),
     idx: r.idx, total: r.total, solved: r.solved, firstRight: r.firstRight, xp: r.xp,
     combo: r.combo, maxCombo: r.maxCombo,
@@ -824,18 +845,110 @@ function resumeQuiz(r) {
 function persistFlash() {
   if (!F) return;
   writeResume({
-    kind: 'flash', saved: Date.now(),
+    kind: 'flash', saved: Date.now(), scope: F.scope,
     title: F.title, queue: F.queue, idx: F.idx, total: F.total, unknown: [...F.unknown], koFirst: flashKoFirst,
   });
 }
 function resumeFlash(r) {
-  F = { title: r.title, queue: r.queue, idx: r.idx, total: r.total, known: 0, flipped: false, unknown: new Set(r.unknown) };
+  closeAct();
+  F = { scope: r.scope, title: r.title, queue: r.queue, idx: r.idx, total: r.total, known: 0, flipped: false, unknown: new Set(r.unknown) };
   flashKoFirst = !!r.koFirst;
   openOverlay('flash');
   renderFlash();
 }
+// 저장된 진행 상황이 있으면 "이어서 하기 / 처음부터" 를 물어봄
+function launchQuiz(keys, opts) {
+  const saved = loadResume(quizScope(opts.title));
+  if (!saved) { startQuiz(keys, opts); return; }
+  askResume(saved, () => startQuiz(keys, opts));
+}
+function launchFlash(keys, title) {
+  const saved = loadResume(flashScope(title));
+  if (!saved) { startFlash(keys, title); return; }
+  askResume(saved, () => startFlash(keys, title));
+}
+function askResume(r, restart) {
+  const pr = resumeProgress(r);
+  openAct(r.title, `
+    <p class="note" style="margin:0 0 10px">하던 기록이 있어요.</p>
+    <div class="rc-prog"><span class="mini-bar"><i style="width:${pr.all ? (pr.done / pr.all) * 100 : 0}%"></i></span><small>${pr.text}</small></div>
+    <div style="display:grid;gap:10px">
+      <button class="btn blue" id="askGo">이어서 하기</button>
+      <button class="btn" id="askNew">처음부터 하기</button>
+    </div>`);
+  $('#askGo').addEventListener('click', () => (r.kind === 'quiz' ? resumeQuiz(r) : resumeFlash(r)));
+  $('#askNew').addEventListener('click', restart);
+}
+
+// 파트 나누기: 교재 순서대로 10개 안팎씩 (24단어 → 8·8·8)
+function sectionParts(sec) {
+  const n = sec.keys.length;
+  const count = Math.max(1, Math.ceil(n / 10));
+  const size = Math.ceil(n / count);
+  const no = sec.lesson.replace(/\D/g, '');
+  return Array.from({ length: count }, (_, i) => ({
+    label: `${no}-${i + 1}`,
+    title: `${sec.full} ${no}-${i + 1}`,
+    from: i * size + 1,
+    keys: sec.keys.slice(i * size, (i + 1) * size),
+  })).filter((p) => p.keys.length);
+}
+function openSection(sec) {
+  const parts = sectionParts(sec);
+  const len = Math.min(sec.keys.length, state.settings.len);
+  const rows = [
+    { title: sec.full, label: '전체', desc: `${sec.keys.length}단어 중 약한 단어 위주 ${len}문제`, keys: sec.keys, opts: { title: sec.full, keys: sec.keys } },
+    ...(parts.length > 1 ? parts.map((p) => ({
+      title: p.title, label: p.label, keys: p.keys,
+      desc: `${p.from}~${p.from + p.keys.length - 1}번 · ${p.keys.slice(0, 3).map((k) => WORD_BY_KEY[k].jp).join(' · ')}${p.keys.length > 3 ? ' …' : ''}`,
+      opts: { title: p.title, keys: p.keys, all: true },
+    })) : []),
+  ];
+  openAct(sec.full, `
+    <div class="pick-list">${rows.map((r, i) => {
+      const saved = loadResume(quizScope(r.title));
+      const m = mastery(r.keys);
+      return `
+      <div class="pick ${saved ? 'has-save' : ''}">
+        <div class="pick-main">
+          <div class="pick-top"><b>${esc(r.label)}</b><span>숙련도 ${m}%</span></div>
+          <small lang="ja">${esc(r.desc)}</small>
+          <span class="mini-bar"><i style="width:${m}%"></i></span>
+        </div>
+        <div class="pick-act">
+          ${saved
+            ? `<button class="btn small blue" data-go="${i}">이어서 ${resumeProgress(saved).done}/${resumeProgress(saved).all}</button>
+               <button class="btn small" data-new="${i}">처음부터</button>`
+            : `<button class="btn small primary" data-new="${i}">시작</button>`}
+        </div>
+      </div>`;
+    }).join('')}</div>`);
+  $$('[data-go]', $('#actBody')).forEach((b) => b.addEventListener('click', () => resumeQuiz(loadResume(quizScope(rows[+b.dataset.go].title)))));
+  $$('[data-new]', $('#actBody')).forEach((b) => b.addEventListener('click', () => {
+    const r = rows[+b.dataset.new];
+    startQuiz(r.keys, r.opts);
+  }));
+}
+
+// 아래에서 올라오는 선택 창
+function openAct(title, html) {
+  $('#actTitle').textContent = title;
+  $('#actBody').innerHTML = html;
+  $('#actSheet').hidden = false;
+}
+function closeAct() {
+  const el = $('#actSheet');
+  if (el) el.hidden = true;
+}
+$('#actClose').addEventListener('click', closeAct);
+$('#actSheet').addEventListener('click', (e) => { if (e.target.id === 'actSheet') closeAct(); });
+
 function resumeProgress(r) {
-  if (r.kind === 'quiz') return { done: r.solved, all: r.total, text: `${r.solved} / ${r.total}문제` };
+  if (r.kind === 'quiz') {
+    // 푼 문제 수 = 지금까지 지나온 문제 중 다시 나온 문제(복습)를 뺀 것
+    const done = Math.min(r.total, r.queue.slice(0, r.idx).filter((q) => !q.retry).length);
+    return { done, all: r.total, text: `${done} / ${r.total}문제 풀었어요` };
+  }
   const done = Math.min(r.idx, r.total);
   return { done, all: r.queue.length, text: `카드 ${r.idx} / ${r.queue.length}장` };
 }
@@ -849,7 +962,7 @@ window.addEventListener('pagehide', () => { if (S) saveSessionTime(); if (F) per
 
 function finishQuiz() {
   saveSessionTime();
-  clearResume();
+  clearResume(S.scope);
   const secs = Math.round((Date.now() - S.start) / 1000);
   const acc = S.total ? Math.round((S.firstRight / S.total) * 100) : 0;
   state.sessions.unshift({ ts: Date.now(), title: S.title, n: S.total, right: S.firstRight, xp: S.xp, secs });
@@ -893,7 +1006,7 @@ function quitQuiz() {
   const started = S && (S.idx > 0 || S.answered);
   saveSessionTime();
   if (started) toast('저장했어요. 홈에서 이어서 할 수 있어요');
-  else clearResume();
+  else clearResume(S.scope);
   closeOverlay();
 }
 $('#quitBtn').addEventListener('click', quitQuiz);
@@ -925,13 +1038,14 @@ let flashKoFirst = false;
 function startFlash(keys, title) {
   keys = [...new Set(keys)];
   if (!keys.length) { toast('단어가 없어요'); return; }
-  F = { title, queue: shuffle(keys), idx: 0, total: keys.length, known: 0, flipped: false, unknown: new Set() };
+  closeAct();
+  F = { scope: flashScope(title), title, queue: shuffle(keys), idx: 0, total: keys.length, known: 0, flipped: false, unknown: new Set() };
   openOverlay('flash');
   renderFlash();
 }
 function renderFlash() {
   if (F.idx >= F.queue.length) {
-    clearResume();
+    clearResume(F.scope);
     const n = F.unknown.size;
     $('#f-bar').style.width = '100%';
     $('#f-main').innerHTML = `
@@ -1007,7 +1121,7 @@ function flashMark(known) {
 }
 $('#flashQuit').addEventListener('click', () => {
   if (F && F.idx > 0 && F.idx < F.queue.length) { persistFlash(); toast('저장했어요. 홈에서 이어서 할 수 있어요'); }
-  else if (F && F.idx === 0) clearResume();
+  else if (F && F.idx === 0) clearResume(F.scope);
   closeOverlay();
 });
 $('#flashDir').addEventListener('click', () => {
@@ -1071,14 +1185,15 @@ const RENDER = {
     const dday = examInfo();
     const wrongN = Object.keys(state.wrong).length;
     const learned = ALL_KEYS.filter((k) => lv(k) >= 3).length;
-    const resume = loadResume();
+    const resumes = allResumes();
+    const resume = resumes[0];
     let html = '';
     if (resume) {
       const pr = resumeProgress(resume);
       html += `
       <div class="card resume-card">
         <div class="rc-head"><span class="rc-kind">${resume.kind === 'quiz' ? '퀴즈' : '플래시카드'}</span><b>이어서 하기</b></div>
-        <div class="rc-title">${esc(resume.title)}</div>
+        <div class="rc-title">${esc(resume.title)}${resumes.length > 1 ? ` <small class="note">· 하던 범위 ${resumes.length - 1}개 더 (각 범위를 누르면 이어서 할 수 있어요)</small>` : ''}</div>
         <div class="rc-prog"><span class="mini-bar"><i style="width:${pr.all ? (pr.done / pr.all) * 100 : 0}%"></i></span><small>${pr.text}</small></div>
         <div class="row">
           <button class="btn" id="rcDiscard">처음부터</button>
@@ -1119,10 +1234,11 @@ const RENDER = {
       html += `<div class="lesson-head"><h2>${esc(L.title)}</h2><button class="btn small blue" data-lesson="${L.id}">${esc(L.title)} 전체 ▶</button></div>`;
       SECTIONS.filter((s) => s.lessonId === L.id).forEach((s, i) => {
         const m = mastery(s.keys);
+        const going = resumes.some((r) => r.kind === 'quiz' && r.title.startsWith(s.full));
         html += `
           <button class="unit" data-sec="${s.id}">
             <span class="badge ${m >= 80 ? 'gold' : 'b' + (i + 1)}">${m >= 80 ? ic('star') : BADGES[i]}</span>
-            <span class="info"><b>${esc(s.title)}</b><small>${s.keys.length}단어 · 숙련도 ${m}%</small><span class="mini-bar"><i style="width:${m}%"></i></span></span>
+            <span class="info"><b>${esc(s.title)}</b><small>${s.keys.length}단어 · 숙련도 ${m}%${going ? ' · <em class="going">하던 중</em>' : ''}</small><span class="mini-bar"><i style="width:${m}%"></i></span></span>
             <span class="go">›</span>
           </button>`;
       });
@@ -1135,27 +1251,26 @@ const RENDER = {
       $('#rcGo').addEventListener('click', () => (resume.kind === 'quiz' ? resumeQuiz(resume) : resumeFlash(resume)));
       // 같은 범위를 새로 시작 (지금까지 쌓인 학습 기록은 그대로)
       $('#rcDiscard').addEventListener('click', () => {
-        clearResume();
+        clearResume(resume.scope);
         if (resume.kind === 'quiz') startQuiz(resume.srcKeys, Object.assign({}, resume.opts));
         else startFlash([...new Set(resume.queue)], resume.title);
       });
     }
-    $('#examBtn').addEventListener('click', () => startQuiz(ALL_KEYS, { title: '시험 대비 (1–2과)', keys: ALL_KEYS }));
+    $('#examBtn').addEventListener('click', () => launchQuiz(ALL_KEYS, { title: '시험 대비 (1–2과)', keys: ALL_KEYS }));
     $$('[data-drill]', body).forEach((b) => b.addEventListener('click', () => {
       const t = b.dataset.drill;
       const title = { read: '한자 → 히라가나', hira: '한국어 → 히라가나', kata: '외래어 → 가타카나' }[t];
-      startQuiz(ALL_KEYS, { title, type: t, keys: ALL_KEYS });
+      launchQuiz(ALL_KEYS, { title, type: t, keys: ALL_KEYS });
     }));
     $('#wrongUnit').addEventListener('click', startWrongReview);
-    $('#flashAll').addEventListener('click', () => startFlash(ALL_KEYS, '1–2과 전체'));
+    $('#flashAll').addEventListener('click', () => launchFlash(ALL_KEYS, '1–2과 전체'));
     $$('[data-lesson]', body).forEach((b) => b.addEventListener('click', () => {
       const L = LESSONS.find((x) => x.id === b.dataset.lesson);
       const keys = lessonKeys(L.id);
-      startQuiz(keys, { title: `${L.title} 전체`, keys });
+      launchQuiz(keys, { title: `${L.title} 전체`, keys });
     }));
     $$('[data-sec]', body).forEach((b) => b.addEventListener('click', () => {
-      const s = SECTIONS.find((x) => x.id === b.dataset.sec);
-      startQuiz(s.keys, { title: s.full, keys: s.keys });
+      openSection(SECTIONS.find((x) => x.id === b.dataset.sec));
     }));
   },
 
@@ -1186,8 +1301,8 @@ const RENDER = {
       ${wordList(keys.map((k) => WORD_BY_KEY[k]), { del: true, wrongMode: true })}`;
     bindWordList(body);
     $('#wStart').addEventListener('click', startWrongReview);
-    $('#wAll').addEventListener('click', () => startQuiz(keys, { title: '오답노트 전체', all: true, keys }));
-    $('#wFlash').addEventListener('click', () => startFlash(keys, '오답노트'));
+    $('#wAll').addEventListener('click', () => launchQuiz(keys, { title: '오답노트 전체', all: true, keys }));
+    $('#wFlash').addEventListener('click', () => launchFlash(keys, '오답노트'));
     $('#wClear').addEventListener('click', () => {
       if (!confirm('오답노트를 모두 비울까요?')) return;
       state.wrong = {}; save(); RENDER.wrong();
@@ -1236,8 +1351,8 @@ const RENDER = {
     $('#tKo').addEventListener('click', () => { f.hideKo = !f.hideKo; RENDER.words(); });
     $('#tJp').addEventListener('click', () => { f.hideJp = !f.hideJp; RENDER.words(); });
     $('#tSort').addEventListener('click', () => { f.sort = f.sort === 'weak' ? '' : 'weak'; RENDER.words(); });
-    $('#wQuiz').addEventListener('click', () => startQuiz(current, { title: title() }));
-    $('#wCards').addEventListener('click', () => startFlash(current, title()));
+    $('#wQuiz').addEventListener('click', () => launchQuiz(current, { title: title() }));
+    $('#wCards').addEventListener('click', () => launchFlash(current, title()));
   },
 
   stats() {
@@ -1332,7 +1447,7 @@ const wordsFilter = { sec: 'all', q: '', hideKo: false, hideJp: false, sort: '' 
 function startWrongReview() {
   const keys = Object.keys(state.wrong).filter((k) => WORD_BY_KEY[k]);
   if (!keys.length) { toast('오답노트가 비어 있어요'); return; }
-  startQuiz(keys, { title: '오답노트 복습', len: 20, keys });
+  launchQuiz(keys, { title: '오답노트 복습', len: 20, keys });
 }
 
 function exportData() {

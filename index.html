@@ -89,6 +89,14 @@
     </div>
   </div>
 
+  <!-- 선택 창 (이어서/처음부터, 파트 고르기) -->
+  <div class="sheet-backdrop" id="actSheet" hidden>
+    <div class="sheet" role="dialog">
+      <div class="sheet-head"><h2 id="actTitle"></h2><button class="icon-btn" id="actClose" aria-label="닫기"><i data-ic="close"></i></button></div>
+      <div id="actBody"></div>
+    </div>
+  </div>
+
   <div class="toast" id="toast" hidden></div>
 
   <script src="words.js"></script>
