@@ -70,6 +70,7 @@ const DEFAULT_SETTINGS = {
   sfx: true,
   tts: true,
   goal: 100,
+  full: false,
 };
 let state = load();
 function load() {
@@ -550,6 +551,7 @@ function renderQuestion() {
     renderTiles();
   }
   renderFootAsk();
+  persistQuiz();
 }
 
 function renderTiles() {
@@ -701,6 +703,7 @@ function submit(skipped) {
   $('#fbSpeak').addEventListener('click', () => speak(w.kana));
   $('#nextBtn').addEventListener('click', nextQuestion);
   // 효과음이 끝날 즈음 단어 읽어주기
+  persistQuiz();
   if (state.settings.tts) { clearTimeout(speakTimer); speakTimer = setTimeout(() => speak(w.kana), state.settings.sfx ? 380 : 0); }
   $('#nextBtn').focus({ preventScroll: true });
 }
@@ -748,10 +751,87 @@ function saveSessionTime() {
   if (!S) return;
   const secs = Math.round((Date.now() - S.start) / 1000) - S.timeSaved;
   if (secs > 0) { today().t += Math.min(secs, 3600); S.timeSaved += secs; save(); }
+  persistQuiz();
 }
+
+/* ------------------------------------------------------------
+ * 이어서 하기: 진행 중인 퀴즈/플래시카드를 저장해 두고 다시 불러오기
+ * ------------------------------------------------------------ */
+const RESUME_KEY = 'jpvocab.resume';
+function writeResume(data) {
+  try { localStorage.setItem(RESUME_KEY, JSON.stringify(data)); } catch (e) { /* 무시 */ }
+}
+function clearResume() {
+  try { localStorage.removeItem(RESUME_KEY); } catch (e) { /* 무시 */ }
+}
+function loadResume() {
+  try {
+    const r = JSON.parse(localStorage.getItem(RESUME_KEY));
+    if (!r || !Array.isArray(r.queue)) return null;
+    const keys = r.kind === 'quiz' ? r.queue.map((q) => q.key) : r.queue;
+    if (!keys.length || !keys.every((k) => WORD_BY_KEY[k])) return null;
+    return r;
+  } catch (e) {
+    return null;
+  }
+}
+function persistQuiz() {
+  if (!S) return;
+  writeResume({
+    kind: 'quiz', saved: Date.now(),
+    title: S.title, opts: S.opts, srcKeys: S.srcKeys,
+    // 답을 확인한 뒤 나갔으면 다음 문제부터
+    idx: S.answered ? S.idx + 1 : S.idx,
+    total: S.total, solved: S.solved, firstRight: S.firstRight, xp: S.xp,
+    combo: S.combo, maxCombo: S.maxCombo,
+    elapsed: Date.now() - S.start, timeSaved: S.timeSaved,
+    wrongKeys: [...S.wrongKeys], graduated: S.graduated.map((w) => w.key),
+    queue: S.queue.map(({ w, picked, selected, typed, kbd, ...rest }) => ({ ...rest, key: w.key })),
+  });
+}
+function resumeQuiz(r) {
+  S = {
+    title: r.title, opts: r.opts || {}, srcKeys: r.srcKeys || [],
+    queue: r.queue.map((q) => ({ ...q, w: WORD_BY_KEY[q.key], picked: [], selected: -1, typed: '' })),
+    idx: r.idx, total: r.total, solved: r.solved, firstRight: r.firstRight, xp: r.xp,
+    combo: r.combo, maxCombo: r.maxCombo,
+    start: Date.now() - r.elapsed, timeSaved: r.timeSaved,
+    wrongKeys: new Set(r.wrongKeys), graduated: r.graduated.map((k) => WORD_BY_KEY[k]).filter(Boolean),
+    answered: false,
+  };
+  openOverlay('quiz');
+  if (S.idx >= S.queue.length) finishQuiz();
+  else renderQuestion();
+}
+function persistFlash() {
+  if (!F) return;
+  writeResume({
+    kind: 'flash', saved: Date.now(),
+    title: F.title, queue: F.queue, idx: F.idx, total: F.total, unknown: [...F.unknown], koFirst: flashKoFirst,
+  });
+}
+function resumeFlash(r) {
+  F = { title: r.title, queue: r.queue, idx: r.idx, total: r.total, known: 0, flipped: false, unknown: new Set(r.unknown) };
+  flashKoFirst = !!r.koFirst;
+  openOverlay('flash');
+  renderFlash();
+}
+function resumeProgress(r) {
+  if (r.kind === 'quiz') return { done: r.solved, all: r.total, text: `${r.solved} / ${r.total}문제` };
+  const done = Math.min(r.idx, r.total);
+  return { done, all: r.queue.length, text: `카드 ${r.idx} / ${r.queue.length}장` };
+}
+// 앱을 내리거나 닫을 때도 진행 상황 저장
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'hidden') return;
+  if (S) saveSessionTime();
+  if (F) persistFlash();
+});
+window.addEventListener('pagehide', () => { if (S) saveSessionTime(); if (F) persistFlash(); });
 
 function finishQuiz() {
   saveSessionTime();
+  clearResume();
   const secs = Math.round((Date.now() - S.start) / 1000);
   const acc = S.total ? Math.round((S.firstRight / S.total) * 100) : 0;
   state.sessions.unshift({ ts: Date.now(), title: S.title, n: S.total, right: S.firstRight, xp: S.xp, secs });
@@ -792,8 +872,10 @@ function finishQuiz() {
 }
 
 function quitQuiz() {
-  if (S && S.idx > 0 && !confirm('그만할까요? 지금까지 푼 기록은 저장돼요.')) return;
+  const started = S && (S.idx > 0 || S.answered);
   saveSessionTime();
+  if (started) toast('저장했어요. 홈에서 이어서 할 수 있어요');
+  else clearResume();
   closeOverlay();
 }
 $('#quitBtn').addEventListener('click', quitQuiz);
@@ -832,6 +914,7 @@ function startFlash(keys, title) {
 }
 function renderFlash() {
   if (F.idx >= F.queue.length) {
+    clearResume();
     const n = F.unknown.size;
     $('#f-bar').style.width = '100%';
     $('#f-main').innerHTML = `
@@ -849,6 +932,7 @@ function renderFlash() {
     $('#fHome').addEventListener('click', closeOverlay);
     return;
   }
+  persistFlash();
   const w = WORD_BY_KEY[F.queue[F.idx]];
   F.flipped = false;
   $('#f-bar').style.width = (F.idx / F.queue.length) * 100 + '%';
@@ -904,7 +988,11 @@ function flashMark(known) {
   F.idx++;
   renderFlash();
 }
-$('#flashQuit').addEventListener('click', closeOverlay);
+$('#flashQuit').addEventListener('click', () => {
+  if (F && F.idx > 0 && F.idx < F.queue.length) { persistFlash(); toast('저장했어요. 홈에서 이어서 할 수 있어요'); }
+  else if (F && F.idx === 0) clearResume();
+  closeOverlay();
+});
 $('#flashDir').addEventListener('click', () => {
   flashKoFirst = !flashKoFirst;
   toast(flashKoFirst ? '앞면: 한국어 / 뒷면: 일본어' : '앞면: 일본어 / 뒷면: 뜻');
@@ -966,7 +1054,22 @@ const RENDER = {
     const dday = examInfo();
     const wrongN = Object.keys(state.wrong).length;
     const learned = ALL_KEYS.filter((k) => lv(k) >= 3).length;
-    let html = `
+    const resume = loadResume();
+    let html = '';
+    if (resume) {
+      const pr = resumeProgress(resume);
+      html += `
+      <div class="card resume-card">
+        <div class="rc-head"><span class="rc-kind">${resume.kind === 'quiz' ? '퀴즈' : '플래시카드'}</span><b>이어서 하기</b></div>
+        <div class="rc-title">${esc(resume.title)}</div>
+        <div class="rc-prog"><span class="mini-bar"><i style="width:${pr.all ? (pr.done / pr.all) * 100 : 0}%"></i></span><small>${pr.text}</small></div>
+        <div class="row">
+          <button class="btn" id="rcDiscard">처음부터</button>
+          <button class="btn blue" id="rcGo">이어서 하기</button>
+        </div>
+      </div>`;
+    }
+    html += `
       <div class="card exam-card">
         <div class="dday">${dday || '단어퀴즈'}</div>
         <div class="meta">9월 29일(화) 단어퀴즈 · 범위 1–2과 단어 (${ALL_KEYS.length}개)</div>
@@ -1011,6 +1114,15 @@ const RENDER = {
     html += `<p class="note" style="text-align:center;margin-top:28px">기록은 이 기기의 브라우저에 저장돼요 · 기록 탭에서 백업할 수 있어요</p>`;
     const body = $('#home-body');
     body.innerHTML = html;
+    if (resume) {
+      $('#rcGo').addEventListener('click', () => (resume.kind === 'quiz' ? resumeQuiz(resume) : resumeFlash(resume)));
+      // 같은 범위를 새로 시작 (지금까지 쌓인 학습 기록은 그대로)
+      $('#rcDiscard').addEventListener('click', () => {
+        clearResume();
+        if (resume.kind === 'quiz') startQuiz(resume.srcKeys, Object.assign({}, resume.opts));
+        else startFlash([...new Set(resume.queue)], resume.title);
+      });
+    }
     $('#examBtn').addEventListener('click', () => startQuiz(ALL_KEYS, { title: '시험 대비 (1–2과)', keys: ALL_KEYS }));
     $$('[data-drill]', body).forEach((b) => b.addEventListener('click', () => {
       const t = b.dataset.drill;
@@ -1236,6 +1348,21 @@ function importData(e) {
 }
 
 /* ============================================================
+ * 전체 화면 (안드로이드 아래 내비게이션 바 숨기기)
+ * ============================================================ */
+const CAN_FULL = !!document.documentElement.requestFullscreen;
+function enterFull() {
+  if (!CAN_FULL || document.fullscreenElement) return;
+  document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+}
+function exitFull() {
+  if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+}
+// 전체 화면은 사용자 터치가 있어야 켤 수 있어서, 켜 둔 경우 터치할 때마다 확인
+document.addEventListener('click', () => { if (state.settings.full) enterFull(); }, true);
+document.addEventListener('fullscreenchange', () => setTimeout(fitHeight, 100));
+
+/* ============================================================
  * 설정
  * ============================================================ */
 function renderSettings() {
@@ -1265,7 +1392,11 @@ function renderSettings() {
         <button data-toggle="sfx" class="${s.sfx ? 'on' : ''}">효과음 ${s.sfx ? 'ON' : 'OFF'}</button>
         <button data-toggle="tts" class="${s.tts ? 'on' : ''}">답하면 단어 읽기 ${s.tts ? 'ON' : 'OFF'}</button>
       </div>
-    </div>`;
+    </div>
+    ${CAN_FULL ? `<div class="set-group"><b>전체 화면</b>
+      <div class="seg"><button data-toggle="full" class="${s.full ? 'on' : ''}">전체 화면 ${s.full ? 'ON' : 'OFF'}</button></div>
+      <small>화면 아래 검은 막대(안드로이드 내비게이션 바)와 위 상태 표시줄을 숨겨요. 켜 두면 앱을 열고 처음 터치할 때 자동으로 전체 화면이 돼요.</small>
+    </div>` : ''}`;
   $$('[data-type]', $('#settings-body')).forEach((b) => b.addEventListener('click', () => {
     const t = b.dataset.type;
     s.types[t] = !s.types[t];
@@ -1281,6 +1412,7 @@ function renderSettings() {
     s[b.dataset.toggle] = !s[b.dataset.toggle];
     save(); renderSettings();
     if (b.dataset.toggle === 'tts' && s.tts) speak('はい');
+    if (b.dataset.toggle === 'full') { if (s.full) enterFull(); else exitFull(); }
   }));
 }
 $('#settingsBtn').addEventListener('click', () => { renderSettings(); $('#sheet').hidden = false; });
