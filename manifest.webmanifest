@@ -3,7 +3,7 @@
   "short_name": "단어퀴즈",
   "start_url": "./",
   "scope": "./",
-  "display": "fullscreen",
+  "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#58cc02",
   "icons": [

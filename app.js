@@ -91,6 +91,8 @@ function load() {
     s.settings.full = !!(window.matchMedia && matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches);
     s.settings.v3 = true;
   }
+  // v4: 전체 화면 기본값은 다시 끔 (내비게이션 바는 보이게, 원하면 설정에서 켜기)
+  if (!s.settings.v4) { s.settings.full = false; s.settings.v4 = true; }
   return s;
 }
 function save() {
