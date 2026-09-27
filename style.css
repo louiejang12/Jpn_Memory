@@ -108,7 +108,10 @@ h1, h2, h3 { margin: 0; }
 }
 .icon-btn:active { background: var(--bg-soft); }
 .icon-btn .ic { width: 26px; height: 26px; }
-#settingsBtn { color: var(--muted); }
+#settingsBtn, #reloadBtn { color: var(--muted); }
+#reloadBtn + #settingsBtn { margin-left: 0; }
+#reloadBtn.spin .ic { animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .ic { width: 1.15em; height: 1.15em; flex: none; vertical-align: -0.2em; }
 
 /* ---------- 탭바 ---------- */

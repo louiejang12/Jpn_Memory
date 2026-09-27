@@ -1380,6 +1380,28 @@ document.addEventListener('click', () => { if (state.settings.full) enterFull();
 document.addEventListener('fullscreenchange', () => setTimeout(fitHeight, 100));
 
 /* ============================================================
+ * 앱 새로고침: 캐시를 비우고 최신 버전 받기 (학습 기록은 그대로)
+ * ============================================================ */
+async function reloadApp() {
+  $('#reloadBtn').classList.add('spin');
+  toast('최신 버전으로 새로고침 중…');
+  if (S) saveSessionTime();
+  if (F) persistFlash();
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.update().catch(() => {})));
+    }
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch (e) { /* 무시 */ }
+  location.reload();
+}
+$('#reloadBtn').addEventListener('click', reloadApp);
+
+/* ============================================================
  * 설정
  * ============================================================ */
 function renderSettings() {
@@ -1405,10 +1427,15 @@ function renderSettings() {
         <button data-toggle="tts" class="${s.tts ? 'on' : ''}">답하면 단어 읽기 ${s.tts ? 'ON' : 'OFF'}</button>
       </div>
     </div>
+    <div class="set-group"><b>앱 업데이트</b>
+      <button class="btn small" id="setReload" style="width:100%">앱 새로고침 (최신 버전 받기)</button>
+      <small>화면이 이상하거나 새 기능이 안 보이면 눌러 주세요. 학습 기록은 지워지지 않아요.</small>
+    </div>
     ${CAN_FULL ? `<div class="set-group"><b>전체 화면</b>
       <div class="seg"><button data-toggle="full" class="${s.full ? 'on' : ''}">전체 화면 ${s.full ? 'ON' : 'OFF'}</button></div>
       <small>화면 아래 검은 막대(안드로이드 내비게이션 바)와 위 상태 표시줄을 숨겨요. 켜 두면 앱을 열고 처음 터치할 때 자동으로 전체 화면이 돼요.</small>
     </div>` : ''}`;
+  $('#setReload').addEventListener('click', reloadApp);
   $$('[data-type]', $('#settings-body')).forEach((b) => b.addEventListener('click', () => {
     const t = b.dataset.type;
     s.types[t] = !s.types[t];
