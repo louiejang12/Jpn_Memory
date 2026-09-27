@@ -578,3 +578,26 @@ h1, h2, h3 { margin: 0; }
 .pick-act { display: flex; flex-direction: column; gap: 6px; flex: none; }
 .pick-act .btn { min-height: 38px; width: 92px; padding: 6px 8px; font-size: 13px; }
 .going { font-style: normal; color: var(--blue-dark); font-weight: 800; }
+
+/* ---------- 클리어 / 다음 ---------- */
+.clear-count {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 12px;
+  padding: 6px 14px; border-radius: 999px;
+  background: var(--green-bg); color: var(--green-text); font-weight: 700; font-size: 15px;
+}
+.clear-count .ic { stroke-width: 3; }
+.clear-badge {
+  display: inline-flex; align-items: center; gap: 3px; margin-left: auto;
+  font-style: normal; font-size: 12px; font-weight: 800; color: var(--green-text);
+  background: var(--green-bg); border-radius: 999px; padding: 2px 8px; white-space: nowrap;
+}
+.clear-badge .ic { width: 13px; height: 13px; stroke-width: 3.2; }
+.next-btn { justify-content: space-between; min-height: 56px; font-size: 17px; }
+.next-btn span { text-align: left; }
+
+.clr-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.clr-row:last-of-type { border-bottom: 0; }
+.clr-sec { flex: 0 0 96px; font-size: 13px; font-weight: 700; padding-top: 3px; }
+.clr-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.clr-chip { font-size: 12px; font-weight: 700; color: var(--muted); border: 1.5px solid var(--line); border-radius: 999px; padding: 2px 8px; }
+.clr-chip.on { color: var(--green-text); background: var(--green-bg); border-color: transparent; }

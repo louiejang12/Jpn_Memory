@@ -81,6 +81,10 @@ function load() {
   s.wrong = s.wrong || {};
   s.days = s.days || {};
   s.sessions = s.sessions || [];
+  if (!s.clears) {
+    s.clears = {};
+    s.sessions.forEach((x) => { s.clears[x.title] = (s.clears[x.title] || 0) + 1; });
+  }
   s.xp = s.xp || 0;
   s.settings = Object.assign({}, DEFAULT_SETTINGS, s.settings || {});
   s.settings.types = Object.assign({}, DEFAULT_SETTINGS.types, s.settings.types || {});
@@ -377,6 +381,7 @@ const ICONS = {
   speaker: '<path fill="currentColor" d="M11 5 6.5 9H3.5v6h3L11 19z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',
   keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h1M10.5 10h1M14.5 10h1M7.5 14h9"/>',
   tiles: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
+  play: '<path fill="currentColor" stroke="none" d="M8 5.5v13l10-6.5z"/>',
   star: '<path fill="currentColor" stroke="none" d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/>',
   cards: '<rect x="3" y="6" width="13" height="15" rx="2"/><path d="M8 3h11a2 2 0 0 1 2 2v13"/>',
   retry: '<path d="M4 12a8 8 0 1 0 2.5-5.8M4 4v5h5"/>',
@@ -911,7 +916,7 @@ function openSection(sec) {
       return `
       <div class="pick ${saved ? 'has-save' : ''}">
         <div class="pick-main">
-          <div class="pick-top"><b>${esc(r.label)}</b><span>숙련도 ${m}%</span></div>
+          <div class="pick-top"><b>${esc(r.label)}</b><span>숙련도 ${m}%</span>${clears(r.title) ? `<em class="clear-badge">${ic('check')}클리어 ${clears(r.title)}회</em>` : ''}</div>
           <small lang="ja">${esc(r.desc)}</small>
           <span class="mini-bar"><i style="width:${m}%"></i></span>
         </div>
@@ -929,6 +934,37 @@ function openSection(sec) {
     startQuiz(r.keys, r.opts);
   }));
 }
+
+// 순서대로 풀기: 1과 응용회화 1-1 → 1-2 → … → 1과 문법노트 1-1 → … → 2과 …
+function stageList() {
+  const list = [];
+  SECTIONS.forEach((sec) => {
+    const parts = sectionParts(sec);
+    if (parts.length > 1) parts.forEach((p) => list.push({ title: p.title, keys: p.keys, opts: { title: p.title, keys: p.keys, all: true } }));
+    else list.push({ title: sec.full, keys: sec.keys, opts: { title: sec.full, keys: sec.keys } });
+  });
+  return list;
+}
+function nextStage(title) {
+  const list = stageList();
+  const i = list.findIndex((x) => x.title === title);
+  if (i >= 0) return list[i + 1] || null;
+  // 파트 '전체'로 풀었으면 다음 파트의 '전체'로
+  const si = SECTIONS.findIndex((x) => x.full === title);
+  if (si >= 0 && SECTIONS[si + 1]) {
+    const n = SECTIONS[si + 1];
+    return { title: n.full, keys: n.keys, opts: { title: n.full, keys: n.keys } };
+  }
+  // 과 전체 → 다음 과 전체
+  const li = LESSONS.findIndex((L) => `${L.title} 전체` === title);
+  if (li >= 0 && LESSONS[li + 1]) {
+    const L = LESSONS[li + 1];
+    const keys = lessonKeys(L.id);
+    return { title: `${L.title} 전체`, keys, opts: { title: `${L.title} 전체`, keys } };
+  }
+  return null;
+}
+const clears = (title) => state.clears[title] || 0;
 
 // 아래에서 올라오는 선택 창
 function openAct(title, html) {
@@ -967,8 +1003,10 @@ function finishQuiz() {
   const acc = S.total ? Math.round((S.firstRight / S.total) * 100) : 0;
   state.sessions.unshift({ ts: Date.now(), title: S.title, n: S.total, right: S.firstRight, xp: S.xp, secs });
   state.sessions = state.sessions.slice(0, 100);
+  state.clears[S.title] = clears(S.title) + 1;
   save();
   sfx('done');
+  const next = nextStage(S.title);
   const wrongWords = [...S.wrongKeys].map((k) => WORD_BY_KEY[k]);
   const last = S;
   const d = today();
@@ -979,6 +1017,7 @@ function finishQuiz() {
       <div class="hero-badge ${acc >= 80 ? '' : 'plain'}">${ic('star')}</div>
       <h2>${heading}</h2>
       <p>${esc(last.title)} · ${esc(msg)}</p>
+      <div class="clear-count">${ic('check')}이 범위 <b>${clears(last.title)}번째</b> 클리어</div>
     </div>
     <div class="kpis">
       <div class="kpi"><div class="h">획득 XP</div><div class="v">${last.xp}</div></div>
@@ -989,12 +1028,14 @@ function finishQuiz() {
     ${last.graduated.length ? `<div class="section-title">오답노트 졸업 (${last.graduated.length})</div>${wordList(last.graduated)}` : ''}
     ${wrongWords.length ? `<div class="section-title">이번에 틀린 단어 (${wrongWords.length})</div>${wordList(wrongWords)}` : ''}
     <div class="mt" style="display:grid;gap:10px;margin-top:20px">
+      ${next ? `<button class="btn primary next-btn" id="rNext"><span>다음: ${esc(next.title)}</span>${ic('play')}</button>` : ''}
       ${wrongWords.length ? `<button class="btn red" id="rRetryWrong">틀린 단어만 다시 풀기 (${wrongWords.length})</button>` : ''}
-      <button class="btn primary" id="rAgain">같은 범위 한 번 더</button>
+      <button class="btn ${next ? '' : 'primary'}" id="rAgain">같은 범위 한 번 더</button>
       <button class="btn" id="rHome">홈으로</button>
     </div>`;
   bindWordList($('#result-body'));
   if (wrongWords.length) $('#rRetryWrong').addEventListener('click', () => startQuiz(wrongWords.map((w) => w.key), { title: '방금 틀린 단어', all: true }));
+  if (next) $('#rNext').addEventListener('click', () => launchQuiz(next.keys, next.opts));
   $('#rAgain').addEventListener('click', () => startQuiz(last.srcKeys, Object.assign({}, last.opts)));
   $('#rHome').addEventListener('click', closeOverlay);
   S = null;
@@ -1235,10 +1276,14 @@ const RENDER = {
       SECTIONS.filter((s) => s.lessonId === L.id).forEach((s, i) => {
         const m = mastery(s.keys);
         const going = resumes.some((r) => r.kind === 'quiz' && r.title.startsWith(s.full));
+        const parts = sectionParts(s);
+        const clearTxt = parts.length > 1
+          ? `파트 ${parts.filter((p) => clears(p.title)).length}/${parts.length} 클리어`
+          : `클리어 ${clears(s.full)}회`;
         html += `
           <button class="unit" data-sec="${s.id}">
             <span class="badge ${m >= 80 ? 'gold' : 'b' + (i + 1)}">${m >= 80 ? ic('star') : BADGES[i]}</span>
-            <span class="info"><b>${esc(s.title)}</b><small>${s.keys.length}단어 · 숙련도 ${m}%${going ? ' · <em class="going">하던 중</em>' : ''}</small><span class="mini-bar"><i style="width:${m}%"></i></span></span>
+            <span class="info"><b>${esc(s.title)}</b><small>${s.keys.length}단어 · 숙련도 ${m}% · ${clearTxt}${going ? ' · <em class="going">하던 중</em>' : ''}</small><span class="mini-bar"><i style="width:${m}%"></i></span></span>
             <span class="go">›</span>
           </button>`;
       });
@@ -1405,6 +1450,17 @@ const RENDER = {
           return `<div class="sec-row"><div class="l">${esc(s.full)}<span>${m}%</span></div><div class="mini-bar"><i style="width:${m}%"></i></div></div>`;
         }).join('')}
         <p class="note">숙련도: 한 번에 맞히면 +1칸, 틀리면 −2칸 (단어당 최대 5칸)</p>
+      </div>
+
+      <div class="card">
+        <b style="display:block;margin-bottom:10px">클리어 기록</b>
+        ${SECTIONS.map((sec) => {
+          const parts = sectionParts(sec);
+          const items = parts.length > 1 ? parts.map((p) => [p.label, p.title]) : [['전체', sec.full]];
+          return `<div class="clr-row"><span class="clr-sec">${esc(sec.full)}</span><span class="clr-chips">${items.map(([label, t]) =>
+            `<span class="clr-chip ${clears(t) ? 'on' : ''}">${esc(label)}${clears(t) ? ` <b>${clears(t)}회</b>` : ''}</span>`).join('')}</span></div>`;
+        }).join('')}
+        <p class="note">끝까지 풀면(틀린 문제까지 다 맞히면) 1회 클리어예요</p>
       </div>
 
       ${weak.length ? `<div class="section-title">자주 틀린 단어 TOP ${weak.length}</div>${wordList(weak)}
