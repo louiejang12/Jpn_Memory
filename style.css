@@ -335,15 +335,24 @@ h1, h2, h3 { margin: 0; }
 .text-answer:focus { outline: none; border-color: var(--blue); }
 
 .quiz-foot {
+  position: relative;
+  flex: none;
   padding: 14px 16px calc(14px + var(--safe-b));
   border-top: 2px solid var(--line);
-  display: flex; gap: 10px;
   background: var(--bg);
 }
-.quiz-foot.ok { background: var(--green-bg); border-color: transparent; }
-.quiz-foot.bad { background: var(--red-bg); border-color: transparent; }
-.quiz-foot .btn.skip { flex: 0 0 38%; }
-.feedback { display: flex; flex-direction: column; gap: 12px; width: 100%; animation: up .18s ease-out; }
+.foot-row { display: flex; gap: 10px; }
+.foot-row .btn { flex: 1; }
+.quiz-foot.ok, .quiz-foot.ok .fb-sheet { background: var(--green-bg); border-color: transparent; }
+.quiz-foot.bad, .quiz-foot.bad .fb-sheet { background: var(--red-bg); border-color: transparent; }
+/* 정답 안내 패널: 버튼 줄 바로 위로 겹쳐 올라옴 (버튼 줄 위치는 그대로) */
+.fb-sheet {
+  position: absolute; left: 0; right: 0; bottom: 100%;
+  padding: 16px 16px 4px;
+}
+.fb-sheet:empty { display: none; }
+.foot-row .btn.skip { flex: 0 0 38%; }
+.feedback { display: flex; flex-direction: column; gap: 10px; animation: up .18s ease-out; }
 @keyframes up { from { transform: translateY(20px); opacity: 0; } to { transform: none; opacity: 1; } }
 .fb-head { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 900; }
 .ok .fb-head { color: var(--green-text); }
@@ -544,6 +553,7 @@ h1, h2, h3 { margin: 0; }
   .tile-hint { display: none; }
   .kbd-toggle { margin-top: 8px; }
   .quiz-foot { padding-top: 10px; padding-bottom: calc(10px + var(--safe-b)); }
+  .fb-sheet { padding-top: 12px; }
   .btn { min-height: 46px; padding: 10px 14px; }
   .feedback { gap: 8px; }
   .fb-head { font-size: 19px; }

@@ -86,6 +86,11 @@ function load() {
   s.settings.types = Object.assign({}, DEFAULT_SETTINGS.types, s.settings.types || {});
   // v2: 답하면 단어 읽어주기를 기본으로 켬
   if (!s.settings.v2) { s.settings.tts = true; s.settings.v2 = true; }
+  // v3: 홈 화면에 설치한 앱으로 열었으면 전체 화면(아래 검은 내비게이션 바 숨김)을 기본으로 켬
+  if (!s.settings.v3) {
+    s.settings.full = !!(window.matchMedia && matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches);
+    s.settings.v3 = true;
+  }
   return s;
 }
 function save() {
@@ -620,11 +625,16 @@ function updateCheck() {
 }
 
 function renderFootAsk() {
+  // 버튼 줄은 항상 같은 자리에 고정, 정답 안내는 그 위로 올라오는 패널
   const f = $('#q-foot');
   f.className = 'quiz-foot';
   f.innerHTML = `
-    <button class="btn skip" id="skipBtn">모르겠어요</button>
-    <button class="btn primary" id="checkBtn" disabled>확인</button>`;
+    <div class="fb-sheet" id="fbSheet"></div>
+    <div class="foot-row">
+      <button class="btn skip" id="skipBtn">모르겠어요</button>
+      <button class="btn primary" id="checkBtn" disabled>확인</button>
+    </div>`;
+  $('#q-main').style.paddingBottom = '';
   $('#skipBtn').addEventListener('click', () => submit(true));
   $('#checkBtn').addEventListener('click', () => submit(false));
 }
@@ -688,7 +698,7 @@ function submit(skipped) {
   const f = $('#q-foot');
   f.className = 'quiz-foot ' + (ok ? 'ok' : 'bad');
   f.innerHTML = `
-    <div class="feedback">
+    <div class="fb-sheet feedback" id="fbSheet">
       <div class="fb-head"><span class="ico">${ic(ok ? 'check' : 'x')}</span>${ok ? pick(praise) + (S.combo >= 3 ? ` <small>${S.combo}연속 정답</small>` : '') : skipped ? '정답을 확인하세요' : '오답이에요'}</div>
       <div class="fb-ans">
         ${ok ? '' : '<div>정답:</div>'}
@@ -698,8 +708,20 @@ function submit(skipped) {
         <div>${esc(w.ko)}</div>
         <div class="fb-src">${esc(secLabel(w))}</div>
       </div>
+    </div>
+    <div class="foot-row">
       <button class="btn ${ok ? 'primary' : 'red'}" id="nextBtn">계속</button>
     </div>`;
+  // 패널이 문제를 가리지 않게: 패널 높이만큼 아래 여백을 주고, 정답 표시 부분이 보이게 스크롤
+  const sheetH = $('#fbSheet').offsetHeight;
+  main.style.paddingBottom = sheetH + 16 + 'px';
+  const focusEl = $('.choice.right', main) || $('#tileLine', main) || $('#typed', main);
+  if (focusEl) {
+    const mr = main.getBoundingClientRect();
+    const er = focusEl.getBoundingClientRect();
+    const hidden = er.bottom - (mr.bottom - sheetH - 8);
+    if (hidden > 0) main.scrollTop += hidden;
+  }
   $('#fbSpeak').addEventListener('click', () => speak(w.kana));
   $('#nextBtn').addEventListener('click', nextQuestion);
   // 효과음이 끝날 즈음 단어 읽어주기
