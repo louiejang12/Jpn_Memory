@@ -122,48 +122,67 @@ function mastery(keys) {
 /* ============================================================
  * 문제 생성
  * ============================================================ */
-const DAKU = {};
-['かが', 'きぎ', 'くぐ', 'けげ', 'こご', 'さざ', 'しじ', 'すず', 'せぜ', 'そぞ', 'ただ', 'てで', 'とど', 'はばぱ', 'ひびぴ', 'ふぶぷ', 'へべぺ', 'ほぼぽ']
-  .forEach((g) => [...g].forEach((c) => { DAKU[c] = [...g].filter((x) => x !== c); }));
-const SIZE = {};
-['やゃ', 'ゆゅ', 'よょ', 'つっ'].forEach(([a, b]) => { SIZE[a] = b; SIZE[b] = a; });
-const CONFUSE = {
-  シ: 'ツソ', ツ: 'シソ', ソ: 'ンツ', ン: 'ソシ', ク: 'タケ', タ: 'クヌ', ワ: 'ウフ', ウ: 'ワ', ル: 'レ', レ: 'ル',
-  チ: 'テ', テ: 'チ', ヌ: 'スメ', ス: 'ヌ', コ: 'ユロ', ユ: 'コ', ロ: 'コ', メ: 'ナヌ', ナ: 'メ', マ: 'ア', ア: 'マ',
-  フ: 'ワ', ケ: 'ク', ヲ: 'ラ', ラ: 'ヲ', ホ: 'ポ', ハ: 'バ', ト: 'ド', イ: 'ィ', ー: 'ッ',
-  ぬ: 'め', め: 'ぬ', わ: 'ね', ね: 'れわ', れ: 'ね', る: 'ろ', ろ: 'る', は: 'ほ', ほ: 'は', さ: 'ち', ち: 'さ',
-  き: 'さ', あ: 'お', お: 'あ', い: 'り', り: 'い', こ: 'に', に: 'こ', う: 'つ', し: 'つ', ま: 'も', も: 'ま',
-};
-const HIRA_POOL = [...'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわんがぎぐげござじずぜぞだでどばびぶべぼぱぴぷぺぽっゃゅょ'];
-const KATA_POOL = [...toKata(HIRA_POOL.join('')), 'ー'];
-
-function tileBank(answer) {
-  const chars = [...answer];
-  const cands = [];
-  chars.forEach((c) => {
-    const hc = toHira(c);
-    const back = (x) => (KATA_RE.test(c) ? toKata(x) : x);
-    [...(CONFUSE[c] || '')].forEach((x) => cands.push(x));
-    (DAKU[hc] || []).forEach((x) => cands.push(back(x)));
-    if (SIZE[hc]) cands.push(back(SIZE[hc]));
+// 로마자 → 가나 변환 (일본어 키보드가 없어도 영어 자판으로 입력: hokkaidou → ほっかいどう)
+const ROMA = {};
+(() => {
+  const add = (table) => Object.entries(table).forEach(([k, v]) => { ROMA[k] = v; });
+  add({ a: 'あ', i: 'い', u: 'う', e: 'え', o: 'お' });
+  const rows = {
+    k: 'かきくけこ', g: 'がぎぐげご', s: 'さしすせそ', z: 'ざじずぜぞ', t: 'たちつてと', d: 'だぢづでど',
+    n: 'なにぬねの', h: 'はひふへほ', b: 'ばびぶべぼ', p: 'ぱぴぷぺぽ', m: 'まみむめも', r: 'らりるれろ',
+  };
+  Object.entries(rows).forEach(([c, kana]) => [...'aiueo'].forEach((v, n) => { ROMA[c + v] = kana[n]; }));
+  // 요음 (きゃ 등)
+  const yoon = { k: 'き', g: 'ぎ', s: 'し', z: 'じ', t: 'ち', c: 'ち', d: 'ぢ', n: 'に', h: 'ひ', b: 'び', p: 'ぴ', m: 'み', r: 'り', j: 'じ' };
+  Object.entries(yoon).forEach(([c, k]) => {
+    ROMA[c + 'ya'] = k + 'ゃ'; ROMA[c + 'yu'] = k + 'ゅ'; ROMA[c + 'yo'] = k + 'ょ';
   });
-  const kataAns = KATA_RE.test(answer);
-  if (kataAns && !chars.includes('ー')) cands.push('ー', 'ー');
-  if (!kataAns && !chars.includes('う')) cands.push('う');
-  const nDis = Math.min(7, Math.max(3, Math.round(chars.length * 0.7)));
-  const exclude = new Set(chars);
-  const dis = [];
-  for (const x of shuffle(cands)) {
-    if (dis.length >= nDis) break;
-    if (!exclude.has(x) && !dis.includes(x)) dis.push(x);
+  add({
+    ya: 'や', yu: 'ゆ', yo: 'よ', ye: 'いぇ', wa: 'わ', wo: 'を', wi: 'うぃ', we: 'うぇ',
+    shi: 'し', sha: 'しゃ', shu: 'しゅ', sho: 'しょ', she: 'しぇ',
+    chi: 'ち', cha: 'ちゃ', chu: 'ちゅ', cho: 'ちょ', che: 'ちぇ',
+    tsu: 'つ', tsa: 'つぁ', fu: 'ふ', fa: 'ふぁ', fi: 'ふぃ', fe: 'ふぇ', fo: 'ふぉ',
+    ja: 'じゃ', ji: 'じ', ju: 'じゅ', je: 'じぇ', jo: 'じょ',
+    thi: 'てぃ', thu: 'てゅ', dhi: 'でぃ', dhu: 'でゅ', twu: 'とぅ', dwu: 'どぅ',
+    va: 'ゔぁ', vi: 'ゔぃ', vu: 'ゔ', ve: 'ゔぇ', vo: 'ゔぉ',
+    ca: 'か', cu: 'く', co: 'こ', qa: 'くぁ', qi: 'くぃ', qe: 'くぇ', qo: 'くぉ',
+  });
+  // 작은 글자: x 또는 l (xa→ぁ, xtu→っ, xya→ゃ)
+  [['a', 'ぁ'], ['i', 'ぃ'], ['u', 'ぅ'], ['e', 'ぇ'], ['o', 'ぉ'], ['ya', 'ゃ'], ['yu', 'ゅ'], ['yo', 'ょ'], ['tu', 'っ'], ['tsu', 'っ'], ['wa', 'ゎ']]
+    .forEach(([k, v]) => { ROMA['x' + k] = v; ROMA['l' + k] = v; });
+})();
+const ROMA_PREFIX = new Set();
+Object.keys(ROMA).forEach((k) => { for (let n = 1; n <= k.length; n++) ROMA_PREFIX.add(k.slice(0, n)); });
+
+// final=false: 입력 중(끝의 n 이나 덜 친 자음은 그대로 둠), final=true: 제출할 때(끝의 n → ん)
+function romaToKana(str, kata, final) {
+  const src = str.toLowerCase();
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    const nx = src[i + 1];
+    if (c === '-' ) { out += 'ー'; i++; continue; }
+    if (!/[a-z']/.test(c)) { out += str[i]; i++; continue; }         // 가나 등은 그대로
+    if (c === 'n') {
+      if (nx === undefined) { out += final ? 'ん' : 'n'; i++; continue; }
+      if (nx === 'n' || nx === "'") { out += 'ん'; i += 2; continue; }
+      if (!/[aiueoy]/.test(nx)) { out += 'ん'; i++; continue; }
+    }
+    if (c !== 'n' && /[bcdfghjkmpqrstvwxyz]/.test(c) && (nx === c || (c === 't' && nx === 'c'))) {
+      out += 'っ'; i++; continue;                                        // 촉음: kka → っか, tch → っち
+    }
+    let hit = false;
+    for (let len = 4; len >= 1; len--) {
+      const chunk = src.substr(i, len);
+      if (chunk.length === len && ROMA[chunk]) { out += ROMA[chunk]; i += len; hit = true; break; }
+    }
+    if (hit) continue;
+    const rest = src.slice(i);
+    if (!final && ROMA_PREFIX.has(rest)) { out += rest; break; }          // 아직 치는 중
+    out += str[i]; i++;
   }
-  const pool = kataAns ? KATA_POOL : HIRA_POOL;
-  let guard = 0;
-  while (dis.length < nDis && guard++ < 200) {
-    const x = pick(pool);
-    if (!exclude.has(x) && !dis.includes(x)) dis.push(x);
-  }
-  return shuffle([...chars, ...dis]).map((ch, id) => ({ id, ch }));
+  return kata ? toKata(out) : out;
 }
 
 // 문제는 모두 직접 쓰기(가나 조립) — 시험 형식:
@@ -190,7 +209,9 @@ function chooseType(w, forced) {
 }
 
 function makeQuestion(w, type) {
-  const q = { w, type, answer: w.answer, mode: 'tiles', tiles: tileBank(w.answer) };
+  // 가타카나만으로 된 답이면 가타카나로, 그 외엔 히라가나로 자동 변환
+  const kata = KATA_RE.test(w.answer) && !/[\u3041-\u3096]/.test(w.answer);
+  const q = { w, type, answer: w.answer, mode: 'text', kata };
   if (type === 'read') {
     q.prompt = w.jp; q.promptLang = 'ja';
     q.label = KATA_RE.test(w.answer) ? '읽는 법을 쓰세요' : '읽는 법을 히라가나로 쓰세요';
@@ -198,8 +219,6 @@ function makeQuestion(w, type) {
     q.prompt = w.ko; q.promptLang = 'ko';
     q.label = w.hasKata ? '가타카나로 쓰세요' : '히라가나로 쓰세요';
   }
-  q.picked = [];
-  q.selected = -1;
   q.typed = '';
   return q;
 }
@@ -274,14 +293,6 @@ const SFX = {
     tone(330, 0, 0.18, { type: 'triangle', gain: 0.28, lowpass: 900, partials: [[1, 1], [2, 0.3]] });
     tone(220, 0.15, 0.32, { type: 'triangle', gain: 0.28, lowpass: 700, partials: [[1, 1], [2, 0.3]], slide: 0.92 });
   },
-  // 글자 타일/보기 누를 때 "톡"
-  tap() {
-    tone(1400, 0, 0.06, { type: 'triangle', gain: 0.07, slide: 0.6 });
-  },
-  // 타일 빼기
-  untap() {
-    tone(900, 0, 0.06, { type: 'triangle', gain: 0.06, slide: 0.7 });
-  },
   // 연속 정답 보너스
   combo() {
     [1318.5, 1568, 2093, 2637].forEach((f, i) => tone(f, 0.28 + i * 0.05, 0.3, { partials: BELL, gain: 0.08 }));
@@ -318,8 +329,6 @@ const ICONS = {
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   speaker: '<path fill="currentColor" d="M11 5 6.5 9H3.5v6h3L11 19z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',
-  keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h1M10.5 10h1M14.5 10h1M7.5 14h9"/>',
-  tiles: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
   star: '<path fill="currentColor" stroke="none" d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/>',
   cards: '<rect x="3" y="6" width="13" height="15" rx="2"/><path d="M8 3h11a2 2 0 0 1 2 2v13"/>',
   retry: '<path d="M4 12a8 8 0 1 0 2.5-5.8M4 4v5h5"/>',
@@ -447,83 +456,59 @@ function renderQuestion() {
     </div>
     <div class="q-label">${esc(q.label)}</div>
     <div class="prompt"><div class="t ${promptCls}" ${q.promptLang === 'ja' ? 'lang="ja"' : ''}>${esc(q.prompt)}</div></div>`;
-  if (q.mode === 'choice') {
-    html += `<div class="choices">${q.options
-      .map((o, i) => `<button class="choice" data-i="${i}"><span class="n">${i + 1}</span><span ${o.lang ? 'lang="ja"' : ''}>${esc(o.text)}</span></button>`)
-      .join('')}</div>`;
-  } else {
-    html += `<div id="tileArea"></div>`;
-  }
+  html += `
+    <input class="text-answer" id="typed" lang="ja" type="text" inputmode="text" enterkeyhint="done"
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+      placeholder="${q.kata ? '예) arubaito → アルバイト' : '예) hokkaidou → ほっかいどう'}">
+    <div class="conv-preview" id="convPreview" lang="ja"></div>
+    <div class="type-hint">
+      영어 자판으로 로마자를 치면 ${q.kata ? '<b>가타카나</b>' : '<b>히라가나</b>'}로 바뀌어요 (일본어 키보드도 OK)<br>
+      ん = <b>nn</b> · 촉음 っ = 자음 두 번 (<b>tt</b>) · 장음 ー = <b>-</b>${q.kata ? ' · ティ = <b>thi</b> · フィ = <b>fi</b> · ウェ = <b>we</b>' : ' · を = <b>wo</b>'}
+    </div>`;
   $('#q-main').innerHTML = html;
   $('#q-main').scrollTop = 0;
-  if (q.mode === 'choice') {
-    $$('.choice', $('#q-main')).forEach((b) => b.addEventListener('click', () => selectChoice(+b.dataset.i)));
-  } else {
-    renderTiles();
-  }
+  bindTyping(q);
   renderFootAsk();
   persistQuiz();
 }
 
-function renderTiles() {
-  const q = S.queue[S.idx];
-  const area = $('#tileArea');
-  if (q.kbd) {
-    area.innerHTML = `
-      <input class="text-answer" id="typed" lang="ja" autocomplete="off" autocapitalize="off" spellcheck="false"
-        placeholder="${KATA_RE.test(q.answer) ? 'カタカナ로 입력' : 'ひらがな로 입력'}" value="${esc(q.typed)}">
-      <button class="btn ghost small kbd-toggle" id="kbdToggle">${ic('tiles')}글자 타일로 풀기</button>`;
-    const inp = $('#typed');
-    inp.addEventListener('input', () => { q.typed = inp.value; updateCheck(); });
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); onFootPrimary(); } });
-    if (!S.answered) setTimeout(() => inp.focus(), 50);
-  } else {
-    const pickedSet = new Set(q.picked);
-    const byId = Object.fromEntries(q.tiles.map((t) => [t.id, t]));
-    area.innerHTML = `
-      <div class="tile-line" id="tileLine">${q.picked.map((id) => `<button class="tile" data-id="${id}">${esc(byId[id].ch)}</button>`).join('')}</div>
-      <div class="bank">${q.tiles.map((t) => `<button class="tile ${pickedSet.has(t.id) ? 'used' : ''}" data-id="${t.id}">${esc(t.ch)}</button>`).join('')}</div>
-      <div class="tile-hint">글자를 순서대로 눌러 단어를 만드세요 · 다시 누르면 빠져요</div>
-      <button class="btn ghost small kbd-toggle" id="kbdToggle">${ic('keyboard')}일본어 키보드로 입력</button>`;
-    $$('#tileLine .tile').forEach((b) => b.addEventListener('click', () => {
-      if (S.answered) return;
-      q.picked = q.picked.filter((id) => id !== +b.dataset.id);
-      sfx('untap');
-      renderTiles(); updateCheck();
-    }));
-    $$('.bank .tile').forEach((b) => b.addEventListener('click', () => {
-      if (S.answered) return;
-      const id = +b.dataset.id;
-      if (!q.picked.includes(id)) q.picked.push(id);
-      sfx('tap');
-      renderTiles(); updateCheck();
-    }));
-  }
-  $('#kbdToggle').addEventListener('click', () => {
+function bindTyping(q) {
+  const inp = $('#typed');
+  let composing = false;
+  const convert = () => {
     if (S.answered) return;
-    q.kbd = !q.kbd;
-    renderTiles(); updateCheck();
+    const conv = romaToKana(inp.value, q.kata, false);
+    if (!composing && conv !== inp.value) {
+      inp.value = conv;
+      inp.setSelectionRange(conv.length, conv.length);
+    }
+    q.typed = inp.value;
+    // 키보드가 글자를 조합 중일 때도 바뀔 결과를 미리 보여줌
+    const final = romaToKana(inp.value, q.kata, true);
+    $('#convPreview').textContent = final && final !== inp.value ? '→ ' + final : '';
+    updateCheck();
+  };
+  inp.addEventListener('compositionstart', () => { composing = true; });
+  inp.addEventListener('compositionend', () => { composing = false; convert(); });
+  inp.addEventListener('input', (e) => { composing = !!e.isComposing; convert(); });
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); onFootPrimary(); }
   });
-}
-
-function selectChoice(i) {
-  if (S.answered) return;
-  const q = S.queue[S.idx];
-  if (q.selected !== i) sfx('tap');
-  q.selected = i;
-  $$('.choice').forEach((b) => b.classList.toggle('sel', +b.dataset.i === i));
-  updateCheck();
+  inp.focus({ preventScroll: true });
 }
 
 function userAnswer(q) {
-  if (q.mode === 'choice') return q.selected;
-  if (q.kbd) return stripTilde(q.typed.normalize('NFKC').replace(/\s+/g, ''));
-  const byId = Object.fromEntries(q.tiles.map((t) => [t.id, t.ch]));
-  return q.picked.map((id) => byId[id]).join('');
+  const v = (q.typed || '').normalize('NFKC').replace(/\s+/g, '');
+  return stripTilde(romaToKana(v, q.kata, true));
+}
+function isCorrect(q, a) {
+  if (a === q.answer) return true;
+  // ラベンダーばたけ / ごうコン 처럼 히라가나·가타카나가 섞인 답은 글자 종류는 따지지 않음
+  const mixed = KATA_RE.test(q.answer) && /[\u3041-\u3096]/.test(q.answer);
+  return mixed && toHira(a) === toHira(q.answer);
 }
 function hasAnswer(q) {
-  const a = userAnswer(q);
-  return q.mode === 'choice' ? a >= 0 : a.length > 0;
+  return userAnswer(q).length > 0;
 }
 function updateCheck() {
   const b = $('#checkBtn');
@@ -551,10 +536,8 @@ function submit(skipped) {
   if (!skipped && !hasAnswer(q)) return;
   S.answered = true;
   let ok = false;
-  if (!skipped) {
-    const a = userAnswer(q);
-    ok = q.mode === 'choice' ? q.options[a].correct : a === q.answer;
-  }
+  const mine = skipped ? '' : userAnswer(q);
+  if (!skipped) ok = isCorrect(q, mine);
   const first = !q.retry;
   const gained = ok ? (first ? 10 : 5) : 0;
   record(q.w, ok, first, gained);
@@ -578,20 +561,11 @@ function submit(skipped) {
   }
 
   // 정답 표시
-  if (q.mode === 'choice') {
-    $$('.choice').forEach((b) => {
-      const i = +b.dataset.i;
-      b.disabled = true;
-      b.classList.remove('sel');
-      if (q.options[i].correct) b.classList.add('right');
-      else if (i === q.selected) b.classList.add('wrong');
-    });
-  } else {
-    const line = $('#tileLine');
-    if (line) line.classList.add(ok ? 'right' : 'wrong');
-    const inp = $('#typed');
-    if (inp) inp.readOnly = true;
-  }
+  const inp = $('#typed');
+  inp.value = mine;
+  inp.readOnly = true;
+  inp.classList.add(ok ? 'right' : 'wrong');
+  $('#convPreview').textContent = '';
   const main = $('#q-main');
   main.classList.remove('shake', 'pop');
   void main.offsetWidth;
@@ -607,6 +581,7 @@ function submit(skipped) {
     <div class="fb-sheet feedback" id="fbSheet">
       <div class="fb-head"><span class="ico">${ic(ok ? 'check' : 'x')}</span>${ok ? pick(praise) + (S.combo >= 3 ? ` <small>${S.combo}연속 정답</small>` : '') : skipped ? '정답을 확인하세요' : '오답이에요'}</div>
       <div class="fb-ans">
+        ${!ok && mine ? `<div class="fb-mine">내 답: <span lang="ja">${esc(mine)}</span></div>` : ''}
         ${ok ? '' : '<div>정답:</div>'}
         <span class="big" lang="ja">${esc(w.jp)}</span>
         ${w.kana !== w.jp ? `<span lang="ja">【${esc(w.kana)}】</span>` : ''}
@@ -621,7 +596,7 @@ function submit(skipped) {
   // 패널이 문제를 가리지 않게: 패널 높이만큼 아래 여백을 주고, 정답 표시 부분이 보이게 스크롤
   const sheetH = $('#fbSheet').offsetHeight;
   main.style.paddingBottom = sheetH + 16 + 'px';
-  const focusEl = $('.choice.right', main) || $('#tileLine', main) || $('#typed', main);
+  const focusEl = $('#typed', main);
   if (focusEl) {
     const mr = main.getBoundingClientRect();
     const er = focusEl.getBoundingClientRect();
@@ -714,13 +689,13 @@ function persistQuiz() {
     combo: S.combo, maxCombo: S.maxCombo,
     elapsed: Date.now() - S.start, timeSaved: S.timeSaved,
     wrongKeys: [...S.wrongKeys], graduated: S.graduated.map((w) => w.key),
-    queue: S.queue.map(({ w, picked, selected, typed, kbd, ...rest }) => ({ ...rest, key: w.key })),
+    queue: S.queue.map((q) => ({ key: q.w.key, type: q.type, retry: !!q.retry })),
   });
 }
 function resumeQuiz(r) {
   S = {
     title: r.title, opts: r.opts || {}, srcKeys: r.srcKeys || [],
-    queue: r.queue.map((q) => ({ ...q, w: WORD_BY_KEY[q.key], picked: [], selected: -1, typed: '' })),
+    queue: r.queue.map((q) => Object.assign(makeQuestion(WORD_BY_KEY[q.key], q.type === 'read' ? 'read' : 'toJp'), { retry: !!q.retry })),
     idx: r.idx, total: r.total, solved: r.solved, firstRight: r.firstRight, xp: r.xp,
     combo: r.combo, maxCombo: r.maxCombo,
     start: Date.now() - r.elapsed, timeSaved: r.timeSaved,
@@ -814,8 +789,6 @@ document.addEventListener('keydown', (e) => {
     const q = S.queue[S.idx];
     if (e.target && e.target.id === 'typed') return;
     if (e.key === 'Enter') { e.preventDefault(); onFootPrimary(); return; }
-    if (!S.answered && q.mode === 'choice' && /^[1-4]$/.test(e.key)) selectChoice(+e.key - 1);
-    if (!S.answered && q.mode === 'tiles' && !q.kbd && e.key === 'Backspace') { q.picked.pop(); renderTiles(); updateCheck(); }
   } else if (currentView === 'flash' && F) {
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flipCard(); }
     if (e.key === 'ArrowLeft') flashMark(false);
