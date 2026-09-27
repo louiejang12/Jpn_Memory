@@ -1291,6 +1291,17 @@ $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') { $(
  * 시작
  * ============================================================ */
 $$('[data-ic]').forEach((el) => { el.outerHTML = ic(el.dataset.ic); });
+
+// 화면 높이 = 지금 실제로 보이는 영역 (삼성 인터넷/크롬 아래 툴바, 키보드, 폴더블 화면 전환 대응)
+function fitHeight() {
+  const h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  document.documentElement.style.setProperty('--app-h', Math.round(h) + 'px');
+  window.scrollTo(0, 0);
+}
+fitHeight();
+window.addEventListener('resize', fitHeight);
+window.addEventListener('orientationchange', () => setTimeout(fitHeight, 250));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', fitHeight);
 if ('speechSynthesis' in window) speechSynthesis.getVoices();
 show('home');
 if ('serviceWorker' in navigator && location.protocol === 'https:') {

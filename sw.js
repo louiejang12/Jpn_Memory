@@ -1,5 +1,5 @@
 // 네트워크 우선, 오프라인이면 캐시 사용
-const CACHE = 'jpvocab-v2';
+const CACHE = 'jpvocab-v3';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './words.js', './manifest.webmanifest', './icon.svg', './icon-192.png'];
 
 self.addEventListener('install', (e) => {

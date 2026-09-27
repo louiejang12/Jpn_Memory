@@ -46,7 +46,7 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { margin: 0; height: 100%; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
 body {
   background: var(--bg);
   color: var(--text);
@@ -59,11 +59,14 @@ body {
 button { font: inherit; color: inherit; cursor: pointer; }
 h1, h2, h3 { margin: 0; }
 
+/* 실제로 보이는 화면 높이에 맞춤 (--app-h는 app.js가 계산) — 브라우저 툴바/내비게이션 바에 가려지지 않게 */
 #app {
+  position: fixed;
+  top: 0; left: 0; right: 0;
   max-width: 600px;
   margin: 0 auto;
-  height: 100dvh;
-  position: relative;
+  height: 100vh;
+  height: var(--app-h, 100vh);
   overflow: hidden;
 }
 .view { display: none; flex-direction: column; height: 100%; }
@@ -515,3 +518,34 @@ h1, h2, h3 { margin: 0; }
 }
 .note { font-size: 13px; color: var(--muted); }
 .mt { margin-top: 12px; }
+
+/* ---------- 세로가 짧은 화면 (플립 커버 화면, 툴바가 큰 브라우저 등) ---------- */
+@media (max-height: 760px) {
+  :root { --tab-h: 58px; }
+  .topbar { min-height: 50px; padding-top: calc(6px + var(--safe-t)); padding-bottom: 6px; }
+  .quiz-top { padding-top: calc(8px + var(--safe-t)); padding-bottom: 4px; }
+  .quiz-main { padding-top: 6px; }
+  .q-label { font-size: 18px; margin-bottom: 10px; }
+  .prompt { min-height: 76px; margin-bottom: 12px; }
+  .prompt .t { font-size: 34px; }
+  .prompt .t.ko, .prompt .t.long { font-size: 26px; }
+  .choices { gap: 8px; }
+  .choice { min-height: 50px; padding: 10px 12px; font-size: 17px; }
+  .tile { min-width: 42px; height: 44px; font-size: 21px; }
+  .tile-line { min-height: 54px; margin-bottom: 12px; }
+  .tile-hint { display: none; }
+  .kbd-toggle { margin-top: 8px; }
+  .quiz-foot { padding-top: 10px; padding-bottom: calc(10px + var(--safe-b)); }
+  .btn { min-height: 46px; padding: 10px 14px; }
+  .feedback { gap: 8px; }
+  .fb-head { font-size: 19px; }
+  .fb-ans .big { font-size: 19px; }
+  .fcard { min-height: 200px; }
+  .fcard .big { font-size: 38px; }
+}
+@media (max-height: 560px) {
+  .prompt { min-height: 60px; padding: 6px; }
+  .prompt .t { font-size: 28px; }
+  .q-meta { margin-bottom: 2px; }
+  .fb-src { display: none; }
+}
