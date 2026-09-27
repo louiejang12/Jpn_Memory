@@ -64,7 +64,7 @@ const ALL_KEYS = WORDS.map((w) => w.key);
  * 저장소
  * ============================================================ */
 const DEFAULT_SETTINGS = {
-  types: { read: true, meaning: true, toJp: true },
+  types: { read: true, toJp: true },
   write: 'normal', // normal | more | always
   len: 15,
   sfx: true,
@@ -93,6 +93,10 @@ function load() {
   }
   // v4: 전체 화면 기본값은 다시 끔 (내비게이션 바는 보이게, 원하면 설정에서 켜기)
   if (!s.settings.v4) { s.settings.full = false; s.settings.v4 = true; }
+  // v5: 뜻 맞히기(객관식) 제거
+  delete s.settings.types.meaning;
+  delete s.settings.write;
+  if (!s.settings.types.read && !s.settings.types.toJp) s.settings.types = { read: true, toJp: true };
   return s;
 }
 function save() {
@@ -118,17 +122,11 @@ function mastery(keys) {
 /* ============================================================
  * 문제 생성
  * ============================================================ */
-const ROWS = ['あいうえお', 'かきくけこ', 'がぎぐげご', 'さしすせそ', 'ざじずぜぞ', 'たちつてと', 'だぢづでど', 'なにぬねの',
-  'はひふへほ', 'ばびぶべぼ', 'ぱぴぷぺぽ', 'まみむめも', 'やゆよ', 'らりるれろ', 'わを'];
 const DAKU = {};
 ['かが', 'きぎ', 'くぐ', 'けげ', 'こご', 'さざ', 'しじ', 'すず', 'せぜ', 'そぞ', 'ただ', 'てで', 'とど', 'はばぱ', 'ひびぴ', 'ふぶぷ', 'へべぺ', 'ほぼぽ']
   .forEach((g) => [...g].forEach((c) => { DAKU[c] = [...g].filter((x) => x !== c); }));
 const SIZE = {};
 ['やゃ', 'ゆゅ', 'よょ', 'つっ'].forEach(([a, b]) => { SIZE[a] = b; SIZE[b] = a; });
-const O_U_ROW = 'おこごそぞとどのほぼぽもよょろうくぐすずつぬふぶぷむゆゅる';
-const LONG_ADD = 'こごそぞとどのほぼぽもよょろゅ';
-const E_ROW = 'えけげせぜてでねへべぺめれ';
-const SOKUON_OK = 'かきくけこさしすせそたちつてとぱぴぷぺぽ';
 const CONFUSE = {
   シ: 'ツソ', ツ: 'シソ', ソ: 'ンツ', ン: 'ソシ', ク: 'タケ', タ: 'クヌ', ワ: 'ウフ', ウ: 'ワ', ル: 'レ', レ: 'ル',
   チ: 'テ', テ: 'チ', ヌ: 'スメ', ス: 'ヌ', コ: 'ユロ', ユ: 'コ', ロ: 'コ', メ: 'ナヌ', ナ: 'メ', マ: 'ア', ア: 'マ',
@@ -138,73 +136,6 @@ const CONFUSE = {
 };
 const HIRA_POOL = [...'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわんがぎぐげござじずぜぞだでどばびぶべぼぱぴぷぺぽっゃゅょ'];
 const KATA_POOL = [...toKata(HIRA_POOL.join('')), 'ー'];
-
-// 읽기(가나)를 살짝 틀리게 바꾼 오답 보기 만들기
-function mutateOnce(s) {
-  const arr = [...s];
-  const i = Math.floor(Math.random() * arr.length);
-  const c = arr[i];
-  const isK = KATA_RE.test(c);
-  const hc = toHira(c);
-  const back = (x) => (isK ? toKata(x) : x);
-  const next = arr[i + 1];
-  switch (Math.floor(Math.random() * 5)) {
-    case 0: // 탁음/반탁음
-      if (DAKU[hc]) { arr[i] = back(pick(DAKU[hc])); return arr.join(''); }
-      break;
-    case 1: // 장음
-      if (next && ((toHira(next) === 'う' && O_U_ROW.includes(hc)) || next === 'ー' || (toHira(next) === 'い' && E_ROW.includes(hc)))) {
-        arr.splice(i + 1, 1); return arr.join('');
-      }
-      if (LONG_ADD.includes(hc) || (isK && O_U_ROW.includes(hc))) { arr.splice(i + 1, 0, isK ? 'ー' : 'う'); return arr.join(''); }
-      if (E_ROW.includes(hc)) { arr.splice(i + 1, 0, isK ? 'ー' : 'い'); return arr.join(''); }
-      break;
-    case 2: // 촉음
-      if (hc === 'っ') { arr.splice(i, 1); return arr.join(''); }
-      if (i > 0 && SOKUON_OK.includes(hc) && toHira(arr[i - 1]) !== 'っ') { arr.splice(i, 0, back('っ')); return arr.join(''); }
-      break;
-    case 3: // 작은 글자
-      if (SIZE[hc]) { arr[i] = back(SIZE[hc]); return arr.join(''); }
-      break;
-    default: { // 같은 행 다른 모음
-      const row = ROWS.find((r) => r.includes(hc));
-      if (row && !(next && 'ゃゅょ'.includes(toHira(next)))) { arr[i] = back(pick([...row].filter((x) => x !== hc))); return arr.join(''); }
-    }
-  }
-  return null;
-}
-function readingDistractors(w, n = 3) {
-  const ans = w.answer;
-  const out = new Set();
-  for (let t = 0; t < 300 && out.size < n; t++) {
-    let m = mutateOnce(ans);
-    if (m && Math.random() < 0.25) m = mutateOnce(m) || m;
-    if (m && m !== ans) out.add(m);
-  }
-  if (out.size < n) {
-    for (const x of shuffle(WORDS)) {
-      if (out.size >= n) break;
-      if (x.answer !== ans) out.add(x.answer);
-    }
-  }
-  return [...out].slice(0, n);
-}
-
-const kind = (w) => (/다$/.test(w.ko) ? 'pred' : 'noun');
-function similarWords(w, n, field) {
-  const pool = WORDS.filter((x) => x.key !== w.key && x.ko !== w.ko && x.jp !== w.jp && x.answer !== w.answer);
-  const k = kind(w);
-  const ordered = [...shuffle(pool.filter((x) => kind(x) === k)), ...shuffle(pool.filter((x) => kind(x) !== k))];
-  const seen = new Set([w[field]]);
-  const out = [];
-  for (const x of ordered) {
-    if (out.length >= n) break;
-    if (seen.has(x[field])) continue;
-    seen.add(x[field]);
-    out.push(x);
-  }
-  return out;
-}
 
 function tileBank(answer) {
   const chars = [...answer];
@@ -235,65 +166,37 @@ function tileBank(answer) {
   return shuffle([...chars, ...dis]).map((ch, id) => ({ id, ch }));
 }
 
-const TYPE_NAME = { read: '한자 읽기', meaning: '한국어 의미', toJp: '한국어 → 일본어' };
-
-function tileRatio() {
-  return { normal: 0.5, more: 0.8, always: 1 }[state.settings.write] ?? 0.5;
+// 문제는 모두 직접 쓰기(가나 조립) — 시험 형식:
+//   한자 → 히라가나 / 한국어 → 히라가나 / 외래어(한국어) → 가타카나
+function typeName(q) {
+  if (q.type === 'read') return '한자 → 히라가나';
+  return q.w.hasKata ? '외래어 → 가타카나' : '한국어 → 히라가나';
 }
+
 function eligibleTypes(w, forced) {
   const t = state.settings.types;
-  const list = [];
   const allow = (x) => (forced ? forced === x : t[x]);
+  const list = [];
   if (allow('read') && w.hasKanji) list.push('read');
-  if (allow('meaning')) list.push('meaning');
   if (allow('toJp')) list.push('toJp');
-  if (!list.length) list.push(forced === 'read' ? 'meaning' : 'meaning');
+  if (!list.length) list.push(w.hasKanji && forced === 'read' ? 'read' : 'toJp');
   return list;
 }
 function chooseType(w, forced) {
   const list = eligibleTypes(w, forced);
-  // 가타카나 단어는 쓰기(한→일) 문제를 더 자주
-  if (w.hasKata && list.includes('toJp') && Math.random() < 0.6) return 'toJp';
+  // 외래어는 가타카나 쓰기 위주
+  if (w.hasKata && list.includes('toJp') && Math.random() < 0.7) return 'toJp';
   return pick(list);
 }
 
 function makeQuestion(w, type) {
-  const q = { w, type, answer: w.answer };
-  const useTiles = Math.random() < tileRatio();
+  const q = { w, type, answer: w.answer, mode: 'tiles', tiles: tileBank(w.answer) };
   if (type === 'read') {
     q.prompt = w.jp; q.promptLang = 'ja';
-    if (useTiles) {
-      q.mode = 'tiles'; q.label = '읽는 법을 가나로 만드세요';
-      q.tiles = tileBank(w.answer);
-    } else {
-      q.mode = 'choice'; q.label = '올바른 읽기를 고르세요';
-      q.options = shuffle([
-        { text: w.answer, lang: 'ja', correct: true },
-        ...readingDistractors(w).map((t) => ({ text: t, lang: 'ja', correct: false })),
-      ]);
-    }
-  } else if (type === 'meaning') {
-    q.prompt = w.jp; q.promptLang = 'ja';
-    q.mode = 'choice'; q.label = '뜻을 고르세요';
-    q.options = shuffle([
-      { text: w.ko, correct: true },
-      ...similarWords(w, 3, 'ko').map((x) => ({ text: x.ko, correct: false })),
-    ]);
+    q.label = KATA_RE.test(w.answer) ? '읽는 법을 쓰세요' : '읽는 법을 히라가나로 쓰세요';
   } else {
     q.prompt = w.ko; q.promptLang = 'ko';
-    if (w.hasKata) {
-      q.mode = 'tiles'; q.label = '일본어로 쓰세요 (가타카나)';
-      q.tiles = tileBank(w.answer);
-    } else if (useTiles) {
-      q.mode = 'tiles'; q.label = '일본어(가나)로 쓰세요';
-      q.tiles = tileBank(w.answer);
-    } else {
-      q.mode = 'choice'; q.label = '일본어로 고르세요';
-      q.options = shuffle([
-        { text: w.jp, lang: 'ja', correct: true },
-        ...similarWords(w, 3, 'jp').map((x) => ({ text: x.jp, lang: 'ja', correct: false })),
-      ]);
-    }
+    q.label = w.hasKata ? '가타카나로 쓰세요' : '히라가나로 쓰세요';
   }
   q.picked = [];
   q.selected = -1;
@@ -512,10 +415,11 @@ function startQuiz(keys, opts = {}) {
   keys = srcKeys.filter((k) => WORD_BY_KEY[k]);
   if (opts.type === 'read') keys = keys.filter((k) => WORD_BY_KEY[k].hasKanji);
   if (opts.type === 'kata') keys = keys.filter((k) => WORD_BY_KEY[k].hasKata);
+  if (opts.type === 'hira') keys = keys.filter((k) => !WORD_BY_KEY[k].hasKata);
   if (!keys.length) { toast('풀 단어가 없어요'); return; }
   const len = opts.all ? keys.length : Math.min(keys.length, opts.len || state.settings.len);
   const chosen = opts.all ? shuffle(keys) : pickForSession(keys, len);
-  const forced = opts.type === 'kata' ? 'toJp' : opts.type;
+  const forced = opts.type === 'kata' || opts.type === 'hira' ? 'toJp' : opts.type;
   const queue = chosen.map((k) => {
     const w = WORD_BY_KEY[k];
     return makeQuestion(w, chooseType(w, forced));
@@ -539,7 +443,7 @@ function renderQuestion() {
   let html = `
     <div class="q-meta">
       <span class="lesson-pill">${esc(secLabel(q.w))}</span>
-      <span class="q-type ${q.retry ? 'retry' : ''}">${q.retry ? ic('retry') + '다시 한 번 · ' : ''}${TYPE_NAME[q.type]}</span>
+      <span class="q-type ${q.retry ? 'retry' : ''}">${q.retry ? ic('retry') + '다시 한 번 · ' : ''}${typeName(q)}</span>
     </div>
     <div class="q-label">${esc(q.label)}</div>
     <div class="prompt"><div class="t ${promptCls}" ${q.promptLang === 'ja' ? 'lang="ja"' : ''}>${esc(q.prompt)}</div></div>`;
@@ -1097,7 +1001,7 @@ const RENDER = {
       <div class="card exam-card">
         <div class="dday">${dday || '단어퀴즈'}</div>
         <div class="meta">9월 29일(화) 단어퀴즈 · 범위 1–2과 단어 (${ALL_KEYS.length}개)</div>
-        <div class="tags"><span>한자 읽기</span><span>한국어 의미</span><span>한국어→일본어</span><span>가타카나 쓰기</span></div>
+        <div class="tags"><span>한자 → 히라가나</span><span>한국어 → 히라가나</span><span>외래어 → 가타카나</span></div>
         <button class="btn" id="examBtn">시험 대비 퀴즈 시작</button>
       </div>
       <div class="card goal"><span>오늘</span><div class="gbar"><i style="width:${Math.min(100, (d.xp / state.settings.goal) * 100)}%"></i></div><b>${d.xp}/${state.settings.goal} XP</b></div>
@@ -1105,9 +1009,9 @@ const RENDER = {
 
       <div class="section-title">집중 연습</div>
       <div class="drill-grid">
-        <button class="drill" data-drill="read"><span class="e" lang="ja">漢</span><b>한자 읽기</b><small>漢字→かな</small></button>
-        <button class="drill" data-drill="meaning"><span class="e">뜻</span><b>뜻 맞히기</b><small>日本語→한국어</small></button>
-        <button class="drill" data-drill="kata"><span class="e" lang="ja">カ</span><b>가타카나 쓰기</b><small>한국어→カナ</small></button>
+        <button class="drill" data-drill="read"><span class="e" lang="ja">漢</span><b>한자 → 히라가나</b><small>漢字 → かな</small></button>
+        <button class="drill" data-drill="hira"><span class="e" lang="ja">あ</span><b>한국어 → 히라가나</b><small>한국어 → かな</small></button>
+        <button class="drill" data-drill="kata"><span class="e" lang="ja">カ</span><b>외래어 → 가타카나</b><small>한국어 → カナ</small></button>
       </div>
 
       <div class="section-title">복습</div>
@@ -1150,7 +1054,7 @@ const RENDER = {
     $('#examBtn').addEventListener('click', () => startQuiz(ALL_KEYS, { title: '시험 대비 (1–2과)', keys: ALL_KEYS }));
     $$('[data-drill]', body).forEach((b) => b.addEventListener('click', () => {
       const t = b.dataset.drill;
-      const title = { read: '한자 읽기 집중', meaning: '뜻 맞히기 집중', kata: '가타카나 쓰기 집중' }[t];
+      const title = { read: '한자 → 히라가나', hira: '한국어 → 히라가나', kata: '외래어 → 가타카나' }[t];
       startQuiz(ALL_KEYS, { title, type: t, keys: ALL_KEYS });
     }));
     $('#wrongUnit').addEventListener('click', startWrongReview);
@@ -1395,15 +1299,10 @@ function renderSettings() {
   $('#settings-body').innerHTML = `
     <div class="set-group"><b>문제 유형</b>
       <div class="seg">
-        <button data-type="read" class="${s.types.read ? 'on' : ''}">한자 읽기</button>
-        <button data-type="meaning" class="${s.types.meaning ? 'on' : ''}">한국어 의미</button>
-        <button data-type="toJp" class="${s.types.toJp ? 'on' : ''}">한→일</button>
+        <button data-type="read" class="${s.types.read ? 'on' : ''}">한자 → 히라가나</button>
+        <button data-type="toJp" class="${s.types.toJp ? 'on' : ''}">한국어 → 가나</button>
       </div>
-      <small>시험 형식과 같게 세 가지 모두 켜 두는 걸 추천해요</small>
-    </div>
-    <div class="set-group"><b>쓰기(글자 타일) 문제 비율</b>
-      ${seg('write', [['normal', '보통'], ['more', '많이'], ['always', '항상']], s.write)}
-      <small>읽기·한→일 문제를 객관식 대신 가나를 직접 조립하게 해요. 가타카나 단어는 항상 쓰기로 나와요.</small>
+      <small>모든 문제는 직접 쓰기예요. "한국어 → 가나"는 일반 단어는 히라가나, 외래어는 가타카나로 써요.</small>
     </div>
     <div class="set-group"><b>한 번에 푸는 문제 수</b>
       ${seg('len', [[10, '10'], [15, '15'], [20, '20'], [30, '30']], s.len)}
@@ -1424,7 +1323,7 @@ function renderSettings() {
   $$('[data-type]', $('#settings-body')).forEach((b) => b.addEventListener('click', () => {
     const t = b.dataset.type;
     s.types[t] = !s.types[t];
-    if (!s.types.read && !s.types.meaning && !s.types.toJp) { s.types[t] = true; toast('최소 한 가지는 켜야 해요'); }
+    if (!s.types.read && !s.types.toJp) { s.types[t] = true; toast('최소 한 가지는 켜야 해요'); }
     save(); renderSettings();
   }));
   $$('[data-set]', $('#settings-body')).forEach((b) => b.addEventListener('click', () => {

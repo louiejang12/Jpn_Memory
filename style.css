@@ -233,7 +233,7 @@ h1, h2, h3 { margin: 0; }
 .drill .e { font-size: 28px; font-weight: 800; display: block; line-height: 1.2; color: var(--blue); }
 .drill:nth-child(2) .e { color: var(--green); }
 .drill:nth-child(3) .e { color: var(--purple); }
-.drill b { font-size: 13px; display: block; margin-top: 4px; }
+.drill b { font-size: 13px; display: block; margin-top: 4px; word-break: keep-all; line-height: 1.3; }
 .drill small { font-size: 11px; color: var(--muted); }
 
 /* ---------- 퀴즈 ---------- */
