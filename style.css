@@ -96,6 +96,12 @@ h1, h2, h3 { margin: 0; }
   padding: 4px 10px; border-radius: 12px;
 }
 .stat-pill .ic { width: 24px; height: 24px; }
+.stat-pill { min-width: 0; white-space: nowrap; }
+.topbar .icon-btn { flex: none; }
+@media (max-width: 380px) {
+  .topbar { gap: 2px; padding-left: 10px; padding-right: 10px; }
+  .stat-pill { padding: 4px 6px; font-size: 15px; }
+}
 .stat-pill:nth-child(1) { color: var(--orange); }
 .stat-pill:nth-child(2) { color: var(--gold); }
 .stat-pill:nth-child(2) b { color: var(--gold-dark); }
@@ -227,7 +233,7 @@ h1, h2, h3 { margin: 0; }
 .mini-bar i { display: block; height: 100%; background: var(--green); border-radius: 999px; }
 .unit .go { color: var(--line-dark); font-size: 22px; font-weight: 900; }
 
-.drill-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.drill-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .drill {
   border: 2px solid var(--line); border-bottom-width: 4px; border-radius: var(--radius);
   background: var(--card); padding: 12px 6px; text-align: center;
@@ -381,7 +387,7 @@ h1, h2, h3 { margin: 0; }
 .hero-badge.plain { background: var(--blue); box-shadow: 0 6px 0 var(--blue-dark); }
 .result-hero h2 { font-size: 28px; font-weight: 900; color: var(--gold-dark); margin-top: 10px; }
 .result-hero p { color: var(--muted); margin: 6px 0 0; }
-.kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 20px 0; }
+.kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 20px 0; }
 .kpi {
   border: 2px solid var(--gold); border-radius: 14px; overflow: hidden; text-align: center;
 }
@@ -446,7 +452,7 @@ h1, h2, h3 { margin: 0; }
 .empty b { display: block; color: var(--text); font-size: 18px; margin: 10px 0 4px; }
 
 /* ---------- 기록 ---------- */
-.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
 .stat-tile { border: 2px solid var(--line); border-radius: 14px; padding: 12px; display: flex; gap: 10px; align-items: center; }
 .stat-tile > div { min-width: 0; }
 .stat-tile b { font-size: 20px; font-weight: 900; display: block; line-height: 1.1; }
@@ -502,7 +508,7 @@ h1, h2, h3 { margin: 0; }
 }
 .sheet-backdrop[hidden] { display: none; }
 .sheet {
-  width: 100%; max-width: 600px; max-height: 88dvh; overflow-y: auto;
+  width: 100%; max-width: 600px; max-height: 88dvh; overflow-y: auto; overflow-x: hidden;
   background: var(--bg); border-radius: 20px 20px 0 0;
   padding: 8px 16px calc(24px + var(--safe-b));
   animation: up .2s ease-out;
@@ -562,21 +568,21 @@ h1, h2, h3 { margin: 0; }
 }
 
 /* ---------- 파트 고르기 ---------- */
-.pick-list { display: grid; gap: 10px; margin-bottom: 8px; }
+.pick-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-bottom: 8px; }
 .pick {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: 10px; min-width: 0;
   border: 2px solid var(--line); border-bottom-width: 4px; border-radius: 14px;
   padding: 12px; background: var(--card);
 }
 .pick.has-save { border-color: var(--blue); background: var(--blue-bg); }
 .pick-main { flex: 1; min-width: 0; }
-.pick-top { display: flex; align-items: baseline; gap: 8px; }
+.pick-top { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
 .pick-top b { font-size: 18px; font-weight: 900; }
 .pick-top span { font-size: 12px; color: var(--muted); font-weight: 700; }
 .pick-main small { display: block; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .pick-main .mini-bar { margin-top: 6px; }
 .pick-act { display: flex; flex-direction: column; gap: 6px; flex: none; }
-.pick-act .btn { min-height: 38px; width: 92px; padding: 6px 8px; font-size: 13px; }
+.pick-act .btn { min-height: 38px; width: auto; min-width: 76px; max-width: 30vw; padding: 6px 10px; font-size: 13px; white-space: nowrap; }
 .going { font-style: normal; color: var(--blue-dark); font-weight: 800; }
 
 /* ---------- 클리어 / 다음 ---------- */
@@ -587,7 +593,7 @@ h1, h2, h3 { margin: 0; }
 }
 .clear-count .ic { stroke-width: 3; }
 .clear-badge {
-  display: inline-flex; align-items: center; gap: 3px; margin-left: auto;
+  display: inline-flex; align-items: center; gap: 3px;
   font-style: normal; font-size: 12px; font-weight: 800; color: var(--green-text);
   background: var(--green-bg); border-radius: 999px; padding: 2px 8px; white-space: nowrap;
 }
