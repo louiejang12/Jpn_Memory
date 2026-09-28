@@ -1,6 +1,6 @@
 // 네트워크 우선, 오프라인이면 캐시 사용
-const CACHE = 'jpvocab-v14';
-const ASSETS = ['./', './index.html', './style.css', './app.js', './words.js', './manifest.webmanifest', './icon.svg', './icon-192.png'];
+const CACHE = 'jpvocab-v15';
+const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -16,7 +16,7 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
   e.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-cache' })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(req, copy));

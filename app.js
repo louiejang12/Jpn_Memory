@@ -1,5 +1,6 @@
 'use strict';
 
+const APP_VERSION = 15;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
 const EXAM_DATE = '2026-09-29';
 const STORE_KEY = 'jpvocab.v1';
 
@@ -1618,7 +1619,8 @@ async function reloadApp() {
       await Promise.all(keys.map((k) => caches.delete(k)));
     }
   } catch (e) { /* 무시 */ }
-  location.reload();
+  // 주소에 시간 값을 붙여 브라우저 캐시를 건너뛰고 새로 받기
+  location.replace(location.pathname + '?r=' + Date.now());
 }
 $('#reloadBtn').addEventListener('click', reloadApp);
 
@@ -1650,7 +1652,7 @@ function renderSettings() {
     </div>
     <div class="set-group"><b>앱 업데이트</b>
       <button class="btn small" id="setReload" style="width:100%">앱 새로고침 (최신 버전 받기)</button>
-      <small>화면이 이상하거나 새 기능이 안 보이면 눌러 주세요. 학습 기록은 지워지지 않아요.</small>
+      <small>화면이 이상하거나 새 기능이 안 보이면 눌러 주세요. 학습 기록은 지워지지 않아요. · 지금 버전: <b>v${APP_VERSION}</b></small>
     </div>
     ${CAN_FULL ? `<div class="set-group"><b>전체 화면</b>
       <div class="seg"><button data-toggle="full" class="${s.full ? 'on' : ''}">전체 화면 ${s.full ? 'ON' : 'OFF'}</button></div>
@@ -1696,6 +1698,6 @@ window.addEventListener('orientationchange', () => setTimeout(fitHeight, 250));
 if (window.visualViewport) window.visualViewport.addEventListener('resize', fitHeight);
 if ('speechSynthesis' in window) speechSynthesis.getVoices();
 show('home');
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
+if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
