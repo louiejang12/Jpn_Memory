@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 15;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
+const APP_VERSION = 16;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
 const EXAM_DATE = '2026-09-29';
 const STORE_KEY = 'jpvocab.v1';
 
@@ -1171,10 +1171,18 @@ function flipCard() {
   F.flipped = !F.flipped;
   sfx('flip');
   $('#fcard').classList.toggle('flipped', F.flipped);
+  // 뒷면(읽기·뜻)이 보이면 단어 읽어주기 — 설정의 "단어 자동 읽기"를 따름
+  if (F.flipped && state.settings.tts) {
+    const w = WORD_BY_KEY[F.queue[F.idx]];
+    clearTimeout(speakTimer);
+    speakTimer = setTimeout(() => speak(w.kana), state.settings.sfx ? 250 : 0);
+  }
 }
 function flashMark(known) {
   if (!F || F.idx >= F.queue.length) return;
   const k = F.queue[F.idx];
+  clearTimeout(speakTimer);
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
   sfx(known ? 'right' : 'wrong');
   if (!known) {
     if (!F.unknown.has(k)) {
@@ -1647,8 +1655,9 @@ function renderSettings() {
     <div class="set-group"><b>소리</b>
       <div class="seg">
         <button data-toggle="sfx" class="${s.sfx ? 'on' : ''}">효과음 ${s.sfx ? 'ON' : 'OFF'}</button>
-        <button data-toggle="tts" class="${s.tts ? 'on' : ''}">답하면 단어 읽기 ${s.tts ? 'ON' : 'OFF'}</button>
+        <button data-toggle="tts" class="${s.tts ? 'on' : ''}">단어 자동 읽기 ${s.tts ? 'ON' : 'OFF'}</button>
       </div>
+      <small>단어 자동 읽기: 퀴즈에서 답했을 때, 플래시카드를 뒤집었을 때 일본어로 읽어줘요</small>
     </div>
     <div class="set-group"><b>앱 업데이트</b>
       <button class="btn small" id="setReload" style="width:100%">앱 새로고침 (최신 버전 받기)</button>
