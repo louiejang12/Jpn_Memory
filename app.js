@@ -81,6 +81,7 @@ function load() {
   s.wrong = s.wrong || {};
   s.days = s.days || {};
   s.sessions = s.sessions || [];
+  s.retry = s.retry || {};   // 범위별 마지막으로 틀린 단어 (다시 풀기용)
   if (!s.clears) {
     s.clears = {};
     s.sessions.forEach((x) => { s.clears[x.title] = (s.clears[x.title] || 0) + 1; });
@@ -417,6 +418,7 @@ function speak(text) {
  * 화면 전환
  * ============================================================ */
 let currentTab = 'home';
+let homeToTop = false;   // 퀴즈에서 돌아오면 홈 맨 위(이어서 하기·틀린 단어 카드)부터 보이게
 let currentView = 'home';
 function show(view) {
   currentView = view;
@@ -435,10 +437,11 @@ function openOverlay(view) {
 }
 function closeOverlay() {
   if (history.state && history.state.overlay) history.back();
-  else { S = null; F = null; show(currentTab); }
+  else { S = null; F = null; homeToTop = true; show(currentTab); }
 }
 window.addEventListener('popstate', () => {
   if (!['home', 'wrong', 'words', 'stats'].includes(currentView)) {
+    homeToTop = true;
     if (S) saveSessionTime();
     S = null; F = null;
     show(currentTab);
@@ -925,6 +928,7 @@ function openSection(sec) {
             ? `<button class="btn small blue" data-go="${i}">이어서 ${resumeProgress(saved).done}/${resumeProgress(saved).all}</button>
                <button class="btn small" data-new="${i}">처음부터</button>`
             : `<button class="btn small primary" data-new="${i}">시작</button>`}
+          ${retryKeys(r.title).length ? `<button class="btn small red" data-retry="${i}">틀린 ${retryKeys(r.title).length}개</button>` : ''}
         </div>
       </div>`;
     }).join('')}</div>`);
@@ -933,6 +937,7 @@ function openSection(sec) {
     const r = rows[+b.dataset.new];
     startQuiz(r.keys, r.opts);
   }));
+  $$('[data-retry]', $('#actBody')).forEach((b) => b.addEventListener('click', () => startRetry(rows[+b.dataset.retry].title)));
 }
 
 // 순서대로 풀기: 1과 응용회화 1-1 → 1-2 → … → 1과 문법노트 1-1 → … → 2과 …
@@ -965,6 +970,17 @@ function nextStage(title) {
   return null;
 }
 const clears = (title) => state.clears[title] || 0;
+
+// 틀린 단어 다시 풀기: 결과 화면에서 못 누르고 나가도 나중에 다시 할 수 있게 범위별로 저장
+function retryKeys(title) {
+  const r = state.retry[title];
+  return r ? r.keys.filter((k) => WORD_BY_KEY[k]) : [];
+}
+function startRetry(title) {
+  const keys = retryKeys(title);
+  if (!keys.length) { toast('다시 풀 틀린 단어가 없어요'); return; }
+  launchQuiz(keys, { title: `${title} · 틀린 단어`, all: true, keys, retryOf: title });
+}
 
 // 아래에서 올라오는 선택 창
 function openAct(title, html) {
@@ -1004,10 +1020,20 @@ function finishQuiz() {
   state.sessions.unshift({ ts: Date.now(), title: S.title, n: S.total, right: S.firstRight, xp: S.xp, secs });
   state.sessions = state.sessions.slice(0, 100);
   state.clears[S.title] = clears(S.title) + 1;
+  const wrongWords = [...S.wrongKeys].map((k) => WORD_BY_KEY[k]);
+  const baseTitle = S.opts.retryOf || S.title;
+  if (S.opts.retryOf) {
+    // 틀린 단어 다시 풀기를 끝냈으면: 또 틀린 게 있으면 그것만 남기고, 없으면 지움
+    if (wrongWords.length) state.retry[baseTitle] = { keys: wrongWords.map((w) => w.key), ts: Date.now() };
+    else delete state.retry[baseTitle];
+  } else if (wrongWords.length) {
+    state.retry[S.title] = { keys: wrongWords.map((w) => w.key), ts: Date.now() };
+  } else {
+    delete state.retry[S.title];
+  }
   save();
   sfx('done');
-  const next = nextStage(S.title);
-  const wrongWords = [...S.wrongKeys].map((k) => WORD_BY_KEY[k]);
+  const next = nextStage(baseTitle);
   const last = S;
   const d = today();
   const heading = acc === 100 ? '완벽해요!' : acc >= 80 ? '레슨 완료!' : acc >= 50 ? '잘했어요!' : '레슨 완료';
@@ -1029,12 +1055,13 @@ function finishQuiz() {
     ${wrongWords.length ? `<div class="section-title">이번에 틀린 단어 (${wrongWords.length})</div>${wordList(wrongWords)}` : ''}
     <div class="mt" style="display:grid;gap:10px;margin-top:20px">
       ${next ? `<button class="btn primary next-btn" id="rNext"><span>다음: ${esc(next.title)}</span>${ic('play')}</button>` : ''}
-      ${wrongWords.length ? `<button class="btn red" id="rRetryWrong">틀린 단어만 다시 풀기 (${wrongWords.length})</button>` : ''}
+      ${wrongWords.length ? `<button class="btn red" id="rRetryWrong">틀린 단어만 다시 풀기 (${wrongWords.length})</button>
+        <p class="note" style="margin:-4px 0 0;text-align:center">지금 안 해도 홈과 파트 선택 창에서 나중에 다시 풀 수 있어요</p>` : ''}
       <button class="btn ${next ? '' : 'primary'}" id="rAgain">같은 범위 한 번 더</button>
       <button class="btn" id="rHome">홈으로</button>
     </div>`;
   bindWordList($('#result-body'));
-  if (wrongWords.length) $('#rRetryWrong').addEventListener('click', () => startQuiz(wrongWords.map((w) => w.key), { title: '방금 틀린 단어', all: true }));
+  if (wrongWords.length) $('#rRetryWrong').addEventListener('click', () => startRetry(baseTitle));
   if (next) $('#rNext').addEventListener('click', () => launchQuiz(next.keys, next.opts));
   $('#rAgain').addEventListener('click', () => startQuiz(last.srcKeys, Object.assign({}, last.opts)));
   $('#rHome').addEventListener('click', closeOverlay);
@@ -1242,6 +1269,22 @@ const RENDER = {
         </div>
       </div>`;
     }
+    const retries = Object.keys(state.retry)
+      .filter((t) => retryKeys(t).length)
+      .sort((a, b) => state.retry[b].ts - state.retry[a].ts);
+    if (retries.length) {
+      html += `
+      <div class="card retry-card">
+        <div class="rc-head"><span class="rc-kind red">${ic('retry')}</span><b>틀린 단어 다시 풀기</b></div>
+        ${retries.slice(0, 4).map((t) => `
+          <div class="retry-row">
+            <div><b>${esc(t)}</b><small lang="ja">${retryKeys(t).slice(0, 4).map((k) => esc(WORD_BY_KEY[k].jp)).join(' · ')}${retryKeys(t).length > 4 ? ' …' : ''}</small></div>
+            <button class="btn small red" data-rtry="${esc(t)}">${retryKeys(t).length}개 풀기</button>
+            <button class="icon-btn del" data-rdel="${esc(t)}" aria-label="목록에서 빼기">${ic('close')}</button>
+          </div>`).join('')}
+        ${retries.length > 4 ? `<p class="note" style="margin:6px 0 0">외 ${retries.length - 4}개 범위 · 파트를 누르면 볼 수 있어요</p>` : ''}
+      </div>`;
+    }
     html += `
       <div class="card exam-card">
         <div class="dday">${dday || '단어퀴즈'}</div>
@@ -1292,6 +1335,13 @@ const RENDER = {
     html += `<p class="note" style="text-align:center;margin-top:28px">기록은 이 기기의 브라우저에 저장돼요 · 기록 탭에서 백업할 수 있어요</p>`;
     const body = $('#home-body');
     body.innerHTML = html;
+    if (homeToTop) { body.scrollTop = 0; homeToTop = false; }
+    $$('[data-rtry]', body).forEach((b) => b.addEventListener('click', () => startRetry(b.dataset.rtry)));
+    $$('[data-rdel]', body).forEach((b) => b.addEventListener('click', () => {
+      delete state.retry[b.dataset.rdel];
+      save();
+      RENDER.home();
+    }));
     if (resume) {
       $('#rcGo').addEventListener('click', () => (resume.kind === 'quiz' ? resumeQuiz(resume) : resumeFlash(resume)));
       // 같은 범위를 새로 시작 (지금까지 쌓인 학습 기록은 그대로)

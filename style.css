@@ -601,3 +601,15 @@ h1, h2, h3 { margin: 0; }
 .clr-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .clr-chip { font-size: 12px; font-weight: 700; color: var(--muted); border: 1.5px solid var(--line); border-radius: 999px; padding: 2px 8px; }
 .clr-chip.on { color: var(--green-text); background: var(--green-bg); border-color: transparent; }
+
+/* ---------- 틀린 단어 다시 풀기 ---------- */
+.retry-card { border-color: var(--red); border-bottom-width: 4px; background: var(--red-bg); }
+.rc-kind.red { background: var(--red); display: inline-flex; align-items: center; padding: 3px 7px; }
+.rc-kind.red .ic { width: 14px; height: 14px; }
+.retry-row { display: flex; align-items: center; gap: 8px; padding: 10px 0 0; }
+.retry-row > div { flex: 1; min-width: 0; }
+.retry-row b { display: block; font-size: 15px; }
+.retry-row small { display: block; color: var(--red-text); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.retry-row .btn { width: auto; flex: none; }
+.retry-row .icon-btn { margin: 0; width: 32px; height: 32px; color: var(--red-text); }
+.retry-row .icon-btn .ic { width: 18px; height: 18px; }
