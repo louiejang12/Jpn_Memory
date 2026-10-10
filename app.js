@@ -1,7 +1,6 @@
 'use strict';
 
-const APP_VERSION = 16;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
-const EXAM_DATE = '2026-09-29';
+const APP_VERSION = 17;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
 const STORE_KEY = 'jpvocab.v1';
 
 /* ============================================================
@@ -46,7 +45,7 @@ LESSONS.forEach((L, li) => {
           key, jp, kana, ko,
           answer: stripTilde(kana),
           hasKanji: KANJI_RE.test(jp),
-          hasKata: KATA_RE.test(jp),
+          hasKata: KATA_RE.test(jp) || KATA_RE.test(kana),
           secs: [],
         };
         WORD_BY_KEY[key] = w;
@@ -60,6 +59,22 @@ LESSONS.forEach((L, li) => {
 });
 const lessonKeys = (lessonId) => [...new Set(SECTIONS.filter((s) => s.lessonId === lessonId).flatMap((s) => s.keys))];
 const ALL_KEYS = WORDS.map((w) => w.key);
+
+// 지금 고른 공부 세트 (1–2과 / 3–4과) — 고르면 다시 바꿀 때까지 유지
+const curSet = () => SETS.find((x) => x.id === state.settings.set) || SETS[0];
+const curLessons = () => LESSONS.filter((L) => curSet().lessons.includes(L.id));
+const curSections = () => SECTIONS.filter((sec) => curSet().lessons.includes(sec.lessonId));
+const setKeysCache = {};
+function setKeys(id) {
+  if (!setKeysCache[id]) {
+    const set = SETS.find((x) => x.id === id);
+    setKeysCache[id] = [...new Set(SECTIONS.filter((sec) => set.lessons.includes(sec.lessonId)).flatMap((sec) => sec.keys))];
+  }
+  return setKeysCache[id];
+}
+const curKeys = () => setKeys(curSet().id);
+const inCur = (k) => curKeys().includes(k);
+const curWrongKeys = () => Object.keys(state.wrong).filter((k) => WORD_BY_KEY[k] && inCur(k));
 
 /* ============================================================
  * 저장소
@@ -233,7 +248,7 @@ function romaToKana(str, kata, final) {
 // 문제는 모두 직접 쓰기(가나 조립) — 시험 형식:
 //   한자 → 히라가나 / 한국어 → 히라가나 / 외래어(한국어) → 가타카나
 function typeName(q) {
-  if (q.type === 'read') return '한자 → 히라가나';
+  if (q.type === 'read') return q.kata ? '한자 → 가타카나' : '한자 → 히라가나';
   return q.w.hasKata ? '외래어 → 가타카나' : '한국어 → 히라가나';
 }
 
@@ -944,7 +959,7 @@ function openSection(sec) {
 // 순서대로 풀기: 1과 응용회화 1-1 → 1-2 → … → 1과 문법노트 1-1 → … → 2과 …
 function stageList() {
   const list = [];
-  SECTIONS.forEach((sec) => {
+  curSections().forEach((sec) => {
     const parts = sectionParts(sec);
     if (parts.length > 1) parts.forEach((p) => list.push({ title: p.title, keys: p.keys, opts: { title: p.title, keys: p.keys, all: true } }));
     else list.push({ title: sec.full, keys: sec.keys, opts: { title: sec.full, keys: sec.keys } });
@@ -956,15 +971,17 @@ function nextStage(title) {
   const i = list.findIndex((x) => x.title === title);
   if (i >= 0) return list[i + 1] || null;
   // 파트 '전체'로 풀었으면 다음 파트의 '전체'로
-  const si = SECTIONS.findIndex((x) => x.full === title);
-  if (si >= 0 && SECTIONS[si + 1]) {
-    const n = SECTIONS[si + 1];
+  const secs = curSections();
+  const si = secs.findIndex((x) => x.full === title);
+  if (si >= 0 && secs[si + 1]) {
+    const n = secs[si + 1];
     return { title: n.full, keys: n.keys, opts: { title: n.full, keys: n.keys } };
   }
   // 과 전체 → 다음 과 전체
-  const li = LESSONS.findIndex((L) => `${L.title} 전체` === title);
-  if (li >= 0 && LESSONS[li + 1]) {
-    const L = LESSONS[li + 1];
+  const lessons = curLessons();
+  const li = lessons.findIndex((L) => `${L.title} 전체` === title);
+  if (li >= 0 && lessons[li + 1]) {
+    const L = lessons[li + 1];
     const keys = lessonKeys(L.id);
     return { title: `${L.title} 전체`, keys, opts: { title: `${L.title} 전체`, keys } };
   }
@@ -1245,7 +1262,9 @@ function bindWordList(root) {
  * ============================================================ */
 const BADGES = ['회화', '문법', '연습'];
 function examInfo() {
-  const [y, m, d] = EXAM_DATE.split('-').map(Number);
+  const ex = curSet().exam;
+  if (!ex) return null;
+  const [y, m, d] = ex.date.split('-').map(Number);
   const exam = new Date(y, m - 1, d);
   const now = new Date();
   const t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1257,14 +1276,38 @@ const RENDER = {
   home() {
     $('#h-streak').textContent = streak();
     $('#h-xp').textContent = state.xp;
-    $('#h-wrong').textContent = Object.keys(state.wrong).length;
+    $('#h-wrong').textContent = curWrongKeys().length;
+    const body = $('#home-body');
+    // 처음 열면 공부할 세트부터 고르기
+    if (!state.settings.set) {
+      body.innerHTML = `
+        <div class="card set-pick">
+          <h2>어떤 범위를 공부할까요?</h2>
+          <p class="note">고른 범위는 다시 바꿀 때까지 계속 쓰여요. 홈 맨 위에서 언제든 바꿀 수 있어요.</p>
+          <div style="display:grid;gap:12px;margin-top:14px">
+            ${SETS.map((x) => `<button class="btn ${x.id === '34' ? 'primary' : 'blue'}" data-pickset="${x.id}">${esc(x.title)} <small style="opacity:.85">(${setKeys(x.id).length}단어)</small></button>`).join('')}
+          </div>
+        </div>`;
+      $$('[data-pickset]', body).forEach((b) => b.addEventListener('click', () => {
+        state.settings.set = b.dataset.pickset;
+        save();
+        RENDER.home();
+      }));
+      return;
+    }
+    const set = curSet();
+    const KEYS = curKeys();
     const d = today();
     const dday = examInfo();
-    const wrongN = Object.keys(state.wrong).length;
-    const learned = ALL_KEYS.filter((k) => lv(k) >= 3).length;
-    const resumes = allResumes();
+    const wrongN = curWrongKeys().length;
+    const learned = KEYS.filter((k) => lv(k) >= 3).length;
+    const inSet = (keys) => keys.some((k) => inCur(k));
+    const resumes = allResumes().filter((r) => inSet(r.kind === 'quiz' ? r.queue.map((q) => q.key) : r.queue));
     const resume = resumes[0];
-    let html = '';
+    let html = `
+      <div class="set-switch">
+        ${SETS.map((x) => `<button class="${x.id === set.id ? 'on' : ''}" data-set-id="${x.id}">${esc(x.title)}</button>`).join('')}
+      </div>`;
     if (resume) {
       const pr = resumeProgress(resume);
       html += `
@@ -1279,7 +1322,7 @@ const RENDER = {
       </div>`;
     }
     const retries = Object.keys(state.retry)
-      .filter((t) => retryKeys(t).length)
+      .filter((t) => retryKeys(t).length && inSet(retryKeys(t)))
       .sort((a, b) => state.retry[b].ts - state.retry[a].ts);
     if (retries.length) {
       html += `
@@ -1297,12 +1340,12 @@ const RENDER = {
     html += `
       <div class="card exam-card">
         <div class="dday">${dday || '단어퀴즈'}</div>
-        <div class="meta">9월 29일(화) 단어퀴즈 · 범위 1–2과 단어 (${ALL_KEYS.length}개)</div>
+        <div class="meta">${set.exam && dday ? esc(set.exam.label) + ' · ' : ''}범위 ${esc(set.title)} 단어 (${KEYS.length}개)</div>
         <div class="tags"><span>한자 → 히라가나</span><span>한국어 → 히라가나</span><span>외래어 → 가타카나</span></div>
         <button class="btn" id="examBtn">시험 대비 퀴즈 시작</button>
       </div>
       <div class="card goal"><span>오늘</span><div class="gbar"><i style="width:${Math.min(100, (d.xp / state.settings.goal) * 100)}%"></i></div><b>${d.xp}/${state.settings.goal} XP</b></div>
-      <div class="note" style="margin:-4px 4px 0">외운 단어 ${learned}/${ALL_KEYS.length} · 오늘 ${d.q}문제</div>
+      <div class="note" style="margin:-4px 4px 0">외운 단어 ${learned}/${KEYS.length} · 오늘 ${d.q}문제</div>
 
       <div class="section-title">집중 연습</div>
       <div class="drill-grid">
@@ -1319,10 +1362,10 @@ const RENDER = {
       </button>
       <button class="unit" id="flashAll">
         <span class="badge b2">${ic('cards')}</span>
-        <span class="info"><b>플래시카드로 외우기</b><small>1–2과 전체 단어를 카드로 넘겨보기</small></span>
+        <span class="info"><b>플래시카드로 외우기</b><small>${esc(set.title)} 전체 단어를 카드로 넘겨보기</small></span>
         <span class="go">›</span>
       </button>`;
-    LESSONS.forEach((L) => {
+    curLessons().forEach((L) => {
       const lk = lessonKeys(L.id);
       html += `<div class="lesson-head"><h2>${esc(L.title)}</h2><button class="btn small blue" data-lesson="${L.id}">${esc(L.title)} 전체 ▶</button></div>`;
       SECTIONS.filter((s) => s.lessonId === L.id).forEach((s, i) => {
@@ -1342,8 +1385,15 @@ const RENDER = {
       html += `<div class="note" style="margin:0 4px">${esc(L.title)} 숙련도 ${mastery(lk)}%</div>`;
     });
     html += `<p class="note" style="text-align:center;margin-top:28px">기록은 이 기기의 브라우저에 저장돼요 · 기록 탭에서 백업할 수 있어요</p>`;
-    const body = $('#home-body');
     body.innerHTML = html;
+    $$('[data-set-id]', body).forEach((b) => b.addEventListener('click', () => {
+      if (state.settings.set === b.dataset.setId) return;
+      state.settings.set = b.dataset.setId;
+      save();
+      body.scrollTop = 0;
+      RENDER.home();
+      toast(`${curSet().title} 범위로 바꿨어요`);
+    }));
     if (homeToTop) { body.scrollTop = 0; homeToTop = false; }
     $$('[data-rtry]', body).forEach((b) => b.addEventListener('click', () => startRetry(b.dataset.rtry)));
     $$('[data-rdel]', body).forEach((b) => b.addEventListener('click', () => {
@@ -1360,14 +1410,14 @@ const RENDER = {
         else startFlash([...new Set(resume.queue)], resume.title);
       });
     }
-    $('#examBtn').addEventListener('click', () => launchQuiz(ALL_KEYS, { title: '시험 대비 (1–2과)', keys: ALL_KEYS }));
+    $('#examBtn').addEventListener('click', () => launchQuiz(KEYS, { title: `시험 대비 (${set.title})`, keys: KEYS }));
     $$('[data-drill]', body).forEach((b) => b.addEventListener('click', () => {
       const t = b.dataset.drill;
-      const title = { read: '한자 → 히라가나', hira: '한국어 → 히라가나', kata: '외래어 → 가타카나' }[t];
-      launchQuiz(ALL_KEYS, { title, type: t, keys: ALL_KEYS });
+      const title = { read: '한자 → 히라가나', hira: '한국어 → 히라가나', kata: '외래어 → 가타카나' }[t] + ` (${set.title})`;
+      launchQuiz(KEYS, { title, type: t, keys: KEYS });
     }));
     $('#wrongUnit').addEventListener('click', startWrongReview);
-    $('#flashAll').addEventListener('click', () => launchFlash(ALL_KEYS, '1–2과 전체'));
+    $('#flashAll').addEventListener('click', () => launchFlash(KEYS, `${set.title} 전체`));
     $$('[data-lesson]', body).forEach((b) => b.addEventListener('click', () => {
       const L = LESSONS.find((x) => x.id === b.dataset.lesson);
       const keys = lessonKeys(L.id);
@@ -1379,11 +1429,11 @@ const RENDER = {
   },
 
   wrong() {
-    const keys = Object.keys(state.wrong).filter((k) => WORD_BY_KEY[k])
+    const keys = curWrongKeys()
       .sort((a, b) => (state.wrong[b].n || 0) - (state.wrong[a].n || 0) || state.wrong[b].added - state.wrong[a].added);
     const body = $('#wrong-body');
     if (!keys.length) {
-      body.innerHTML = `<div class="empty"><b>오답노트가 비어 있어요</b><p>퀴즈에서 틀리거나 플래시카드에서 “몰라요”를 누른 단어가 여기에 모여요.</p></div>
+      body.innerHTML = `<div class="empty"><b>${esc(curSet().title)} 오답노트가 비어 있어요</b><p>퀴즈에서 틀리거나 플래시카드에서 “몰라요”를 누른 단어가 여기에 모여요.</p></div>
         <button class="btn primary" id="wGo">퀴즈 풀러 가기</button>`;
       $('#wGo').addEventListener('click', () => show('home'));
       return;
@@ -1391,7 +1441,7 @@ const RENDER = {
     body.innerHTML = `
       <div class="card" style="text-align:center">
         <div class="wrong-ico">${ic('wrong')}</div>
-        <b style="font-size:20px">틀린 단어 ${keys.length}개</b>
+        <b style="font-size:20px">${esc(curSet().title)} 틀린 단어 ${keys.length}개</b>
         <p class="note" style="margin:4px 0 14px">복습 퀴즈에서 <b>서로 다른 세션에서 2번</b> 한 번에 맞히면 졸업해요</p>
         <div style="display:grid;gap:10px">
           <button class="btn red" id="wStart">오답 복습 시작 (${Math.min(keys.length, 20)}문제)</button>
@@ -1405,11 +1455,12 @@ const RENDER = {
       ${wordList(keys.map((k) => WORD_BY_KEY[k]), { del: true, wrongMode: true })}`;
     bindWordList(body);
     $('#wStart').addEventListener('click', startWrongReview);
-    $('#wAll').addEventListener('click', () => launchQuiz(keys, { title: '오답노트 전체', all: true, keys }));
-    $('#wFlash').addEventListener('click', () => launchFlash(keys, '오답노트'));
+    $('#wAll').addEventListener('click', () => launchQuiz(keys, { title: `오답노트 전체 (${curSet().title})`, all: true, keys }));
+    $('#wFlash').addEventListener('click', () => launchFlash(keys, `오답노트 (${curSet().title})`));
     $('#wClear').addEventListener('click', () => {
-      if (!confirm('오답노트를 모두 비울까요?')) return;
-      state.wrong = {}; save(); RENDER.wrong();
+      if (!confirm(`${curSet().title} 오답노트를 모두 비울까요?`)) return;
+      keys.forEach((k) => { delete state.wrong[k]; });
+      save(); RENDER.wrong();
     });
     $$('[data-del]', body).forEach((b) => b.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1421,7 +1472,8 @@ const RENDER = {
   words() {
     const body = $('#words-body');
     const f = wordsFilter;
-    const chips = [{ id: 'all', t: '전체' }, ...SECTIONS.map((s) => ({ id: s.id, t: s.full }))];
+    if (f.sec !== 'all' && !curSections().some((x) => x.id === f.sec)) f.sec = 'all';
+    const chips = [{ id: 'all', t: `${curSet().title} 전체` }, ...curSections().map((s) => ({ id: s.id, t: s.full }))];
     body.innerHTML = `
       <div class="chips">${chips.map((c) => `<button class="chip ${f.sec === c.id ? 'on' : ''}" data-chip="${c.id}">${esc(c.t)}</button>`).join('')}</div>
       <input class="search" id="wSearch" type="search" placeholder="검색 (일본어/한국어)" value="${esc(f.q)}">
@@ -1435,10 +1487,10 @@ const RENDER = {
         <button class="btn blue" id="wCards">플래시카드</button>
       </div>
       <div id="wListWrap"></div>`;
-    const title = () => (f.sec === 'all' ? '1–2과 전체' : SECTIONS.find((x) => x.id === f.sec).full);
+    const title = () => (f.sec === 'all' ? `${curSet().title} 전체` : SECTIONS.find((x) => x.id === f.sec).full);
     let current = [];
     const renderList = () => {
-      const keys = f.sec === 'all' ? ALL_KEYS : SECTIONS.find((s) => s.id === f.sec).keys;
+      const keys = f.sec === 'all' ? curKeys() : SECTIONS.find((s) => s.id === f.sec).keys;
       const q = f.q.trim().toLowerCase();
       let words = keys.map((k) => WORD_BY_KEY[k]);
       if (q) words = words.filter((w) => w.jp.includes(q) || w.kana.includes(q) || w.ko.toLowerCase().includes(q) || toHira(w.kana).includes(toHira(q)));
@@ -1465,8 +1517,9 @@ const RENDER = {
     const totalQ = days.reduce((a, [, v]) => a + v.q, 0);
     const totalC = days.reduce((a, [, v]) => a + v.c, 0);
     const totalT = days.reduce((a, [, v]) => a + (v.t || 0), 0);
-    const seen = ALL_KEYS.filter((k) => state.words[k]).length;
-    const mastered = ALL_KEYS.filter((k) => lv(k) >= 4).length;
+    const KEYS = curKeys();
+    const seen = KEYS.filter((k) => state.words[k]).length;
+    const mastered = KEYS.filter((k) => lv(k) >= 4).length;
 
     // 최근 14일
     const cols = [];
@@ -1479,18 +1532,19 @@ const RENDER = {
     }
     const max = Math.max(10, ...cols.map((c) => c.v));
 
-    const weak = ALL_KEYS.filter((k) => state.words[k] && state.words[k].w > 0)
+    const weak = KEYS.filter((k) => state.words[k] && state.words[k].w > 0)
       .sort((a, b) => state.words[b].w - state.words[a].w || lv(a) - lv(b))
       .slice(0, 10)
       .map((k) => WORD_BY_KEY[k]);
 
     body.innerHTML = `
+      <p class="note" style="margin:0 4px 10px">단어 수·숙련도·클리어 기록은 <b>${esc(curSet().title)}</b> 기준이에요 (홈 맨 위에서 범위 바꾸기)</p>
       <div class="tiles">
         <div class="stat-tile"><div><b>${streak()}일</b><small>연속 학습</small></div></div>
         <div class="stat-tile"><div><b>${state.xp}</b><small>총 XP</small></div></div>
         <div class="stat-tile"><div><b>${totalQ ? Math.round((totalC / totalQ) * 100) : 0}%</b><small>정답률 (${totalC}/${totalQ})</small></div></div>
-        <div class="stat-tile"><div><b>${mastered}/${ALL_KEYS.length}</b><small>마스터한 단어</small></div></div>
-        <div class="stat-tile"><div><b>${seen}/${ALL_KEYS.length}</b><small>풀어 본 단어</small></div></div>
+        <div class="stat-tile"><div><b>${mastered}/${KEYS.length}</b><small>마스터한 단어</small></div></div>
+        <div class="stat-tile"><div><b>${seen}/${KEYS.length}</b><small>풀어 본 단어</small></div></div>
         <div class="stat-tile"><div><b>${Math.round(totalT / 60)}분</b><small>총 학습 시간 · ${days.length}일</small></div></div>
       </div>
 
@@ -1504,7 +1558,7 @@ const RENDER = {
 
       <div class="card">
         <b style="display:block;margin-bottom:10px">범위별 숙련도</b>
-        ${SECTIONS.map((s) => {
+        ${curSections().map((s) => {
           const m = mastery(s.keys);
           return `<div class="sec-row"><div class="l">${esc(s.full)}<span>${m}%</span></div><div class="mini-bar"><i style="width:${m}%"></i></div></div>`;
         }).join('')}
@@ -1513,7 +1567,7 @@ const RENDER = {
 
       <div class="card">
         <b style="display:block;margin-bottom:10px">클리어 기록</b>
-        ${SECTIONS.map((sec) => {
+        ${curSections().map((sec) => {
           const parts = sectionParts(sec);
           const items = parts.length > 1 ? parts.map((p) => [p.label, p.title]) : [['전체', sec.full]];
           return `<div class="clr-row"><span class="clr-sec">${esc(sec.full)}</span><span class="clr-chips">${items.map(([label, t]) =>
@@ -1560,9 +1614,9 @@ const RENDER = {
 const wordsFilter = { sec: 'all', q: '', hideKo: false, hideJp: false, sort: '' };
 
 function startWrongReview() {
-  const keys = Object.keys(state.wrong).filter((k) => WORD_BY_KEY[k]);
+  const keys = curWrongKeys();
   if (!keys.length) { toast('오답노트가 비어 있어요'); return; }
-  launchQuiz(keys, { title: '오답노트 복습', len: 20, keys });
+  launchQuiz(keys, { title: `오답노트 복습 (${curSet().title})`, len: 20, keys });
 }
 
 function exportData() {
