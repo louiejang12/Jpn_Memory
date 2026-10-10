@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 17;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
+const APP_VERSION = 18;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
 const STORE_KEY = 'jpvocab.v1';
 
 /* ============================================================
@@ -74,7 +74,12 @@ function setKeys(id) {
 }
 const curKeys = () => setKeys(curSet().id);
 const inCur = (k) => curKeys().includes(k);
-const curWrongKeys = () => Object.keys(state.wrong).filter((k) => WORD_BY_KEY[k] && inCur(k));
+// 숙련도·오답 기록은 세트마다 따로 (두 세트에 같이 나오는 단어도 섞이지 않게)
+// 1–2과는 예전 저장 키 그대로, 다른 세트는 '34#단어' 처럼 앞에 세트 번호를 붙여 저장
+const sk = (k) => (curSet().id === '12' ? k : `${curSet().id}#${k}`);
+const wstat = (k) => state.words[sk(k)];
+const wnote = (k) => state.wrong[sk(k)];
+const curWrongKeys = () => curKeys().filter((k) => wnote(k));
 
 /* ============================================================
  * 저장소
@@ -129,7 +134,7 @@ function streak() {
   while (state.days[dayKey(d)] && state.days[dayKey(d)].q) { n++; d.setDate(d.getDate() - 1); }
   return n;
 }
-const lv = (key) => (state.words[key] ? state.words[key].lv : 0);
+const lv = (key) => (wstat(key) ? wstat(key).lv : 0);
 function mastery(keys) {
   if (!keys.length) return 0;
   return Math.round((keys.reduce((a, k) => a + lv(k), 0) / (keys.length * 5)) * 100);
@@ -481,11 +486,11 @@ let S = null;
 
 function pickForSession(keys, len) {
   const scored = keys.map((k) => {
-    const s = state.words[k];
+    const s = wstat(k);
     let score = Math.random() * 3;
     if (!s) score += 4;
     else score += (5 - s.lv) * 1.5;
-    if (state.wrong[k]) score += 4;
+    if (wnote(k)) score += 4;
     return { k, score };
   });
   return shuffle(scored.sort((a, b) => b.score - a.score).slice(0, len).map((x) => x.k));
@@ -761,7 +766,7 @@ function nextQuestion() {
 }
 
 function record(w, ok, first, gained) {
-  const ws = (state.words[w.key] = state.words[w.key] || { c: 0, w: 0, s: 0, lv: 0, last: 0 });
+  const ws = (state.words[sk(w.key)] = wstat(w.key) || { c: 0, w: 0, s: 0, lv: 0, last: 0 });
   ws.last = Date.now();
   const d = today();
   d.q++;
@@ -771,16 +776,16 @@ function record(w, ok, first, gained) {
     d.c++;
     d.xp += gained;
     state.xp += gained;
-    const wn = state.wrong[w.key];
+    const wn = wnote(w.key);
     if (wn && first) {
       wn.fix = (wn.fix || 0) + 1;
-      if (wn.fix >= 2) { delete state.wrong[w.key]; S.graduated.push(w); }
+      if (wn.fix >= 2) { delete state.wrong[sk(w.key)]; S.graduated.push(w); }
     }
   } else {
     ws.w++; ws.s = 0;
     ws.lv = Math.max(0, ws.lv - 2);
-    const prev = state.wrong[w.key];
-    state.wrong[w.key] = { added: Date.now(), fix: 0, n: ((prev && prev.n) || 0) + 1 };
+    const prev = wnote(w.key);
+    state.wrong[sk(w.key)] = { added: Date.now(), fix: 0, n: ((prev && prev.n) || 0) + 1 };
   }
   save();
 }
@@ -1204,8 +1209,8 @@ function flashMark(known) {
   if (!known) {
     if (!F.unknown.has(k)) {
       F.unknown.add(k);
-      const prev = state.wrong[k];
-      state.wrong[k] = { added: Date.now(), fix: 0, n: ((prev && prev.n) || 0) + 1 };
+      const prev = wnote(k);
+      state.wrong[sk(k)] = { added: Date.now(), fix: 0, n: ((prev && prev.n) || 0) + 1 };
       save();
     }
     F.queue.push(k); // 뒤에서 한 번 더
@@ -1234,8 +1239,8 @@ function dots(key) {
 function wordList(words, opt = {}) {
   if (!words.length) return '';
   return `<div class="wlist">${words.map((w) => {
-    const s = state.words[w.key];
-    const wn = state.wrong[w.key];
+    const s = wstat(w.key);
+    const wn = wnote(w.key);
     return `
       <div class="witem" data-key="${esc(w.key)}">
         <div class="jp ${opt.hideJp ? 'hide-txt' : ''}"><b lang="ja">${esc(w.jp)}</b>${w.kana !== w.jp ? `<small lang="ja">${esc(w.kana)}</small>` : ''}</div>
@@ -1430,7 +1435,7 @@ const RENDER = {
 
   wrong() {
     const keys = curWrongKeys()
-      .sort((a, b) => (state.wrong[b].n || 0) - (state.wrong[a].n || 0) || state.wrong[b].added - state.wrong[a].added);
+      .sort((a, b) => (wnote(b).n || 0) - (wnote(a).n || 0) || wnote(b).added - wnote(a).added);
     const body = $('#wrong-body');
     if (!keys.length) {
       body.innerHTML = `<div class="empty"><b>${esc(curSet().title)} 오답노트가 비어 있어요</b><p>퀴즈에서 틀리거나 플래시카드에서 “몰라요”를 누른 단어가 여기에 모여요.</p></div>
@@ -1459,12 +1464,12 @@ const RENDER = {
     $('#wFlash').addEventListener('click', () => launchFlash(keys, `오답노트 (${curSet().title})`));
     $('#wClear').addEventListener('click', () => {
       if (!confirm(`${curSet().title} 오답노트를 모두 비울까요?`)) return;
-      keys.forEach((k) => { delete state.wrong[k]; });
+      keys.forEach((k) => { delete state.wrong[sk(k)]; });
       save(); RENDER.wrong();
     });
     $$('[data-del]', body).forEach((b) => b.addEventListener('click', (e) => {
       e.stopPropagation();
-      delete state.wrong[b.dataset.del]; save(); RENDER.wrong();
+      delete state.wrong[sk(b.dataset.del)]; save(); RENDER.wrong();
       toast('오답노트에서 뺐어요');
     }));
   },
@@ -1494,7 +1499,7 @@ const RENDER = {
       const q = f.q.trim().toLowerCase();
       let words = keys.map((k) => WORD_BY_KEY[k]);
       if (q) words = words.filter((w) => w.jp.includes(q) || w.kana.includes(q) || w.ko.toLowerCase().includes(q) || toHira(w.kana).includes(toHira(q)));
-      if (f.sort === 'weak') words = words.slice().sort((a, b) => lv(a.key) - lv(b.key) || ((state.words[b.key] || {}).w || 0) - ((state.words[a.key] || {}).w || 0));
+      if (f.sort === 'weak') words = words.slice().sort((a, b) => lv(a.key) - lv(b.key) || ((wstat(b.key) || {}).w || 0) - ((wstat(a.key) || {}).w || 0));
       current = words.map((w) => w.key);
       const wrap = $('#wListWrap');
       wrap.innerHTML = `<p class="note">${words.length}단어 · 가린 칸은 탭하면 보여요 · 탭하면 발음이 나와요</p>
@@ -1518,7 +1523,7 @@ const RENDER = {
     const totalC = days.reduce((a, [, v]) => a + v.c, 0);
     const totalT = days.reduce((a, [, v]) => a + (v.t || 0), 0);
     const KEYS = curKeys();
-    const seen = KEYS.filter((k) => state.words[k]).length;
+    const seen = KEYS.filter((k) => wstat(k)).length;
     const mastered = KEYS.filter((k) => lv(k) >= 4).length;
 
     // 최근 14일
@@ -1532,8 +1537,8 @@ const RENDER = {
     }
     const max = Math.max(10, ...cols.map((c) => c.v));
 
-    const weak = KEYS.filter((k) => state.words[k] && state.words[k].w > 0)
-      .sort((a, b) => state.words[b].w - state.words[a].w || lv(a) - lv(b))
+    const weak = KEYS.filter((k) => wstat(k) && wstat(k).w > 0)
+      .sort((a, b) => wstat(b).w - wstat(a).w || lv(a) - lv(b))
       .slice(0, 10)
       .map((k) => WORD_BY_KEY[k]);
 
