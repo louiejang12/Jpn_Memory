@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#58cc02">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=18">
+  <link rel="stylesheet" href="style.css?v=19">
 </head>
 <body>
   <div id="app">
@@ -58,6 +58,17 @@
       <footer class="quiz-foot" id="q-foot"></footer>
     </section>
 
+    <!-- 한자 쓰기 -->
+    <section class="view" id="view-kanji">
+      <header class="quiz-top">
+        <button class="icon-btn close" id="kQuit" aria-label="그만하기"><i data-ic="close"></i></button>
+        <div class="progress"><div class="bar" id="k-bar"></div></div>
+        <div class="combo num" id="k-count"></div>
+      </header>
+      <main class="quiz-main" id="k-main"></main>
+      <footer class="quiz-foot" id="k-foot"></footer>
+    </section>
+
     <!-- 결과 -->
     <section class="view" id="view-result">
       <div class="scroll" id="result-body"></div>
@@ -99,7 +110,8 @@
 
   <div class="toast" id="toast" hidden></div>
 
-  <script src="words.js?v=18"></script>
-  <script src="app.js?v=18"></script>
+  <script src="words.js?v=19"></script>
+  <script src="kanji_strokes.js?v=19"></script>
+  <script src="app.js?v=19"></script>
 </body>
 </html>

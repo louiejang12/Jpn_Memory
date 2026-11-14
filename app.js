@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 18;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
+const APP_VERSION = 19;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
 const STORE_KEY = 'jpvocab.v1';
 
 /* ============================================================
@@ -92,6 +92,7 @@ const DEFAULT_SETTINGS = {
   tts: true,
   goal: 100,
   full: false,
+  kanjiTest: false,   // 한자 쓰기: 따라 쓰기·보고 쓰기 건너뛰고 안 보고 쓰기만
 };
 let state = load();
 function load() {
@@ -108,6 +109,10 @@ function load() {
     s.sessions.forEach((x) => { s.clears[x.title] = (s.clears[x.title] || 0) + 1; });
   }
   s.xp = s.xp || 0;
+  // v19: 한자 쓰기 기록 (예전 저장본에는 없음 → 빈 칸으로 추가)
+  s.kanji = s.kanji && typeof s.kanji === 'object' ? s.kanji : {};
+  s.kanji.wrong = s.kanji.wrong || {};   // 틀린 한자: { 표기: { added, n, days: [맞힌 날] } }
+  s.kanji.words = s.kanji.words || {};   // 한자별 기록: { 표기: { c, w, last } }
   s.settings = Object.assign({}, DEFAULT_SETTINGS, s.settings || {});
   s.settings.types = Object.assign({}, DEFAULT_SETTINGS.types, s.settings.types || {});
   // v2: 답하면 단어 읽어주기를 기본으로 켬
@@ -407,6 +412,10 @@ const ICONS = {
   star: '<path fill="currentColor" stroke="none" d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/>',
   cards: '<rect x="3" y="6" width="13" height="15" rx="2"/><path d="M8 3h11a2 2 0 0 1 2 2v13"/>',
   retry: '<path d="M4 12a8 8 0 1 0 2.5-5.8M4 4v5h5"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  erase: '<path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10.5 11v5.5M13.5 11v5.5"/>',
+  order: '<path d="M5 19.5c2.5-.8 4-3.5 5.5-7S14.5 6 18.5 5.5"/><path d="M14.5 3.8l4 1.7-1.8 3.9"/><circle cx="5" cy="19.5" r="1.2" fill="currentColor"/>',
+  pen: '<path d="M4 20l1.2-4.6L15.8 4.8a2.1 2.1 0 0 1 3 0l.4.4a2.1 2.1 0 0 1 0 3L8.6 18.8z"/><path d="M13.8 6.8l3.4 3.4"/>',
 };
 const ic = (name, cls = '') =>
   `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
@@ -458,13 +467,14 @@ function openOverlay(view) {
 }
 function closeOverlay() {
   if (history.state && history.state.overlay) history.back();
-  else { S = null; F = null; homeToTop = true; show(currentTab); }
+  else { S = null; F = null; K = null; homeToTop = true; show(currentTab); }
 }
 window.addEventListener('popstate', () => {
   if (!['home', 'wrong', 'words', 'stats'].includes(currentView)) {
     homeToTop = true;
     if (S) saveSessionTime();
-    S = null; F = null;
+    if (K) saveKTime();
+    S = null; F = null; K = null;
     show(currentTab);
   }
 });
@@ -1032,8 +1042,9 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'hidden') return;
   if (S) saveSessionTime();
   if (F) persistFlash();
+  if (K) saveKTime();
 });
-window.addEventListener('pagehide', () => { if (S) saveSessionTime(); if (F) persistFlash(); });
+window.addEventListener('pagehide', () => { if (S) saveSessionTime(); if (F) persistFlash(); if (K) saveKTime(); });
 
 function finishQuiz() {
   saveSessionTime();
@@ -1265,7 +1276,9 @@ function bindWordList(root) {
 /* ============================================================
  * 탭 렌더링
  * ============================================================ */
-const BADGES = ['회화', '문법', '연습'];
+// 파트 배지: 섹션 제목 기준 (6–7과처럼 표현노트가 끼어도 같은 글자·색)
+const BADGES = { 응용회화: ['회화', 'b1'], 문법노트: ['문법', 'b2'], 표현노트: ['표현', 'b4'], 연습노트: ['연습', 'b3'] };
+const badgeOf = (title) => BADGES[title] || [title.slice(0, 2), 'b1'];
 function examInfo() {
   const ex = curSet().exam;
   if (!ex) return null;
@@ -1290,7 +1303,7 @@ const RENDER = {
           <h2>어떤 범위를 공부할까요?</h2>
           <p class="note">고른 범위는 다시 바꿀 때까지 계속 쓰여요. 홈 맨 위에서 언제든 바꿀 수 있어요.</p>
           <div style="display:grid;gap:12px;margin-top:14px">
-            ${SETS.map((x) => `<button class="btn ${x.id === '34' ? 'primary' : 'blue'}" data-pickset="${x.id}">${esc(x.title)} <small style="opacity:.85">(${setKeys(x.id).length}단어)</small></button>`).join('')}
+            ${SETS.map((x) => `<button class="btn ${x.id === SETS[SETS.length - 1].id ? 'primary' : 'blue'}" data-pickset="${x.id}">${esc(x.title)} <small style="opacity:.85">(${setKeys(x.id).length}단어)</small></button>`).join('')}
           </div>
         </div>`;
       $$('[data-pickset]', body).forEach((b) => b.addEventListener('click', () => {
@@ -1370,10 +1383,36 @@ const RENDER = {
         <span class="info"><b>플래시카드로 외우기</b><small>${esc(set.title)} 전체 단어를 카드로 넘겨보기</small></span>
         <span class="go">›</span>
       </button>`;
+    const notes = curNotes();
+    const kAll = notes.flatMap(noteKeys);
+    const kWrong = kWrongKeys(kAll);
+    if (notes.length) {
+      const kUnit = (attr, badge, cls, title, keys) => {
+        const done = keys.filter(kDone).length;
+        const pct = Math.round((done / keys.length) * 100);
+        return `
+        <button class="unit" ${attr}>
+          <span class="badge ${cls}">${badge}</span>
+          <span class="info"><b>${esc(title)}</b><small>${keys.length}단어 · 맞힘 <span class="num">${done}/${keys.length}</span></small><span class="mini-bar"><i style="width:${pct}%"></i></span></span>
+          <span class="go">›</span>
+        </button>`;
+      };
+      html += `<div class="lesson-head"><h2>한자 쓰기</h2><button class="btn small ${state.settings.kanjiTest ? 'blue' : ''}" id="kTestBtn" aria-pressed="${!!state.settings.kanjiTest}">${state.settings.kanjiTest ? ic('check') : ''}시험 모드</button></div>`;
+      notes.forEach((n) => { html += kUnit(`data-knote="${n.id}"`, esc(n.title.replace(/\D/g, '')), n.id === 'K6' ? 'b4' : 'b3', n.title, noteKeys(n)); });
+      if (notes.length > 1) html += kUnit('id="kAllUnit"', ic('pen'), 'b2', `전체 (${notes.map((n) => n.title.replace(/\D/g, '')).join('·')})`, kAll);
+      if (kWrong.length) {
+        html += `
+        <button class="unit" id="kWrongUnit">
+          <span class="badge b5">${ic('retry')}</span>
+          <span class="info"><b>틀린 한자 다시 쓰기</b><small><span class="num">${kWrong.length}</span>개 · <span lang="ja">${kWrong.slice(0, 4).map(esc).join(' · ')}${kWrong.length > 4 ? ' …' : ''}</span></small></span>
+          <span class="go">›</span>
+        </button>`;
+      }
+    }
     curLessons().forEach((L) => {
       const lk = lessonKeys(L.id);
       html += `<div class="lesson-head"><h2>${esc(L.title)}</h2><button class="btn small blue" data-lesson="${L.id}">${esc(L.title)} 전체 ▶</button></div>`;
-      SECTIONS.filter((s) => s.lessonId === L.id).forEach((s, i) => {
+      SECTIONS.filter((s) => s.lessonId === L.id).forEach((s) => {
         const m = mastery(s.keys);
         const going = resumes.some((r) => r.kind === 'quiz' && r.title.startsWith(s.full));
         const parts = sectionParts(s);
@@ -1382,7 +1421,7 @@ const RENDER = {
           : `클리어 ${clears(s.full)}회`;
         html += `
           <button class="unit" data-sec="${s.id}">
-            <span class="badge ${m >= 80 ? 'gold' : 'b' + (i + 1)}">${m >= 80 ? ic('star') : BADGES[i]}</span>
+            <span class="badge ${m >= 80 ? 'gold' : badgeOf(s.title)[1]}">${m >= 80 ? ic('star') : badgeOf(s.title)[0]}</span>
             <span class="info"><b>${esc(s.title)}</b><small>${s.keys.length}단어 · 숙련도 ${m}% · ${clearTxt}${going ? ' · <em class="going">하던 중</em>' : ''}</small><span class="mini-bar"><i style="width:${m}%"></i></span></span>
             <span class="go">›</span>
           </button>`;
@@ -1431,6 +1470,19 @@ const RENDER = {
     $$('[data-sec]', body).forEach((b) => b.addEventListener('click', () => {
       openSection(SECTIONS.find((x) => x.id === b.dataset.sec));
     }));
+    if (notes.length) {
+      $('#kTestBtn').addEventListener('click', () => {
+        state.settings.kanjiTest = !state.settings.kanjiTest;
+        save(); RENDER.home();
+        toast(state.settings.kanjiTest ? '시험 모드: 안 보고 쓰기만' : '시험 모드 끔');
+      });
+      $$('[data-knote]', body).forEach((b) => b.addEventListener('click', () => {
+        const n = K_NOTES.find((x) => x.id === b.dataset.knote);
+        startKanji(noteKeys(n), `한자 쓰기 · ${n.title}`);
+      }));
+      if ($('#kAllUnit')) $('#kAllUnit').addEventListener('click', () => startKanji(kAll, `한자 쓰기 · 전체 (${set.title})`));
+      if ($('#kWrongUnit')) $('#kWrongUnit').addEventListener('click', () => startKanji(kWrong, '한자 쓰기 · 틀린 한자'));
+    }
   },
 
   wrong() {
@@ -1654,6 +1706,375 @@ function importData(e) {
 }
 
 /* ============================================================
+ * 한자 쓰기 (한자노트) — 본보기·획순은 KanjiVG 획 데이터로 그림 (폰 글꼴 자형 차이 방지)
+ * ============================================================ */
+const K_NOTES = typeof KANJI_NOTES !== 'undefined' ? KANJI_NOTES : [];
+const K_STROKES = typeof KANJI_STROKES !== 'undefined' ? KANJI_STROKES : {};
+const isKanjiCh = (c) => KANJI_RE.test(c);
+// 한자 덩어리마다 읽기("わす|もの"), 가나는 그대로 이어 붙여 단어 전체 읽기를 만듦
+function kanjiReading(jp, read) {
+  const runs = jp.match(/[㐀-鿿々]+|[^㐀-鿿々]+/g) || [];
+  const parts = String(read).split('|');
+  let k = 0;
+  let out = '';
+  runs.forEach((r, i) => {
+    if (!KANJI_RE.test(r)) { out += r; return; }
+    let p = parts[k++] || '';
+    const nx = runs[i + 1];
+    // 읽기에 뒤 가나까지 들어간 경우(確かに: たしか) 겹치는 부분은 한 번만
+    if (nx && !KANJI_RE.test(nx)) {
+      for (let L = Math.min(nx.length, p.length - 1); L > 0; L--) {
+        if (p.endsWith(nx.slice(0, L))) { p = p.slice(0, -L); break; }
+      }
+    }
+    out += p;
+  });
+  return out;
+}
+const KW = {};
+K_NOTES.forEach((note) => note.words.forEach(([jp, read, ko]) => {
+  if (!KW[jp]) KW[jp] = { jp, ko, note, chars: [...jp], reading: kanjiReading(jp, read) };
+}));
+const curNotes = () => K_NOTES.filter((n) => n.set === curSet().id);
+const noteKeys = (note) => note.words.map((w) => w[0]);
+const kWrongKeys = (keys) => keys.filter((k) => state.kanji.wrong[k]);
+const kDone = (k) => { const s = state.kanji.words[k]; return !!(s && s.c && !state.kanji.wrong[k]); };
+
+const GUIDE = '<svg class="kguide" viewBox="0 0 109 109" aria-hidden="true"><path d="M54.5 0V109M0 54.5H109"/></svg>';
+function glyphSvg(ch, cls = '') {
+  const ps = K_STROKES[ch] || [];
+  return `<svg class="glyph ${cls}" viewBox="0 0 109 109" aria-hidden="true"><g>${ps.map((d) => `<path d="${d}"/>`).join('')}</g></svg>`;
+}
+const wordGlyphs = (jp, cls = '') => `<span class="wglyphs ${cls}" role="img" aria-label="${esc(jp)}">${[...jp].map((ch) => glyphSvg(ch)).join('')}</span>`;
+function mineSvg(strokes) {
+  const pt = ([x, y]) => `${(x * 109).toFixed(1)},${(y * 109).toFixed(1)}`;
+  return `<svg class="glyph mine" viewBox="0 0 109 109" aria-hidden="true"><g>${strokes.map((st) =>
+    `<polyline points="${st.map(pt).join(' ')}${st.length === 1 ? ' ' + pt([st[0][0] + 0.003, st[0][1]]) : ''}"/>`).join('')}</g></svg>`;
+}
+const STAGE_NAME = { 1: '따라 쓰기', 2: '보고 쓰기', 3: '안 보고 쓰기' };
+
+let K = null;
+function startKanji(keys, title) {
+  keys = [...new Set(keys)].filter((k) => KW[k]);
+  if (!keys.length) { toast('쓸 한자가 없어요'); return; }
+  closeAct();
+  K = {
+    title, src: keys, queue: shuffle(keys).map((jp) => ({ jp, retry: false })), idx: 0, total: keys.length,
+    solved: 0, firstRight: 0, xp: 0, start: Date.now(), timeSaved: 0, wrong: new Set(), graduated: [],
+  };
+  if (currentView === 'result') { history.replaceState({ overlay: 'kanji' }, ''); show('kanji'); }
+  else openOverlay('kanji');
+  kStartItem();
+}
+function kItem() { return K.queue[K.idx]; }
+function kStartItem() {
+  const it = kItem();
+  it.stages = state.settings.kanjiTest ? [3] : it.retry ? [2, 3] : [1, 2, 3];
+  it.si = 0;
+  kRenderStage();
+}
+function kRenderStage() {
+  const it = kItem();
+  const w = KW[it.jp];
+  const stage = it.stages[it.si];
+  it.phase = 'draw';
+  it.cells = w.chars.map((ch) => ({ ch, kanji: isKanjiCh(ch), strokes: [] }));
+  it.hist = [];
+  $('#k-bar').style.width = (K.solved / K.total) * 100 + '%';
+  $('#k-count').textContent = `${Math.min(K.solved + 1, K.total)}/${K.total}`;
+  const steps = it.stages.length > 1
+    ? `<span class="k-steps">${it.stages.map((s, i) => `<i class="${i < it.si ? 'done' : i === it.si ? 'on' : ''}"></i>`).join('')}</span>` : '';
+  $('#k-main').innerHTML = `
+    <div class="q-meta">
+      <span class="lesson-pill">${esc(w.note.title)}</span>
+      <span class="q-type ${it.retry ? 'retry' : ''}">${it.retry ? ic('retry') + '다시 한 번 · ' : ''}${STAGE_NAME[stage]}</span>
+      ${steps}
+    </div>
+    <div class="k-prompt"><div class="k-ko">${esc(w.ko)}</div><div class="k-read" lang="ja">${esc(w.reading)}</div></div>
+    ${stage === 2 ? `<div class="k-model">${wordGlyphs(w.jp)}</div>` : ''}
+    <div class="k-cells" id="kCells">${it.cells.map((c, i) => `
+      <div class="kcell ${c.kanji ? '' : 'kana'}" data-i="${i}">${GUIDE}${c.kanji
+        ? (stage === 1 ? glyphSvg(c.ch, 'trace') : '') + '<canvas></canvas>'
+        : glyphSvg(c.ch, 'given')}</div>`).join('')}
+    </div>
+    <div class="k-tools">
+      <button class="icon-btn" id="kUndo" aria-label="한 획 되돌리기" title="한 획 되돌리기">${ic('undo')}</button>
+      <button class="icon-btn" id="kClear" aria-label="전부 지우기" title="전부 지우기">${ic('erase')}</button>
+      <button class="icon-btn" id="kOrder" aria-label="획순 보기" title="획순 보기">${ic('order')}</button>
+    </div>`;
+  $('#k-main').scrollTop = 0;
+  $$('.kcell', $('#kCells')).forEach((el) => {
+    const cell = it.cells[+el.dataset.i];
+    if (cell.kanji) kBindCell(el, cell, it);
+  });
+  $('#kUndo').addEventListener('click', () => {
+    const c = it.hist.pop();
+    if (!c) return;
+    c.strokes.pop(); c.draw(); kUpdateFoot();
+  });
+  $('#kClear').addEventListener('click', () => {
+    it.cells.forEach((c) => { c.strokes = []; if (c.draw) c.draw(); });
+    it.hist = []; kUpdateFoot();
+  });
+  $('#kOrder').addEventListener('click', () => showOrder(w.jp));
+  const f = $('#k-foot');
+  f.className = 'quiz-foot';
+  f.innerHTML = stage < 3
+    ? `<div class="foot-row"><button class="btn primary" id="kNext" disabled>계속</button></div>`
+    : `<div class="foot-row"><button class="btn skip" id="kSkip">모르겠어요</button><button class="btn primary" id="kCheck" disabled>확인</button></div>`;
+  if (stage < 3) $('#kNext').addEventListener('click', () => { sfx('flip'); it.si++; kRenderStage(); });
+  else {
+    $('#kSkip').addEventListener('click', () => kCheck(true));
+    $('#kCheck').addEventListener('click', () => kCheck(false));
+  }
+}
+const kReady = (it) => it.cells.every((c) => !c.kanji || c.strokes.length);
+function kUpdateFoot() {
+  const b = $('#kNext') || $('#kCheck');
+  if (b) b.disabled = !kReady(kItem());
+}
+function kBindCell(el, cell, it) {
+  const cv = $('canvas', el);
+  const ctx = cv.getContext('2d');
+  const clamp = (v) => Math.max(0, Math.min(1, v));
+  const draw = () => {
+    const s = cv.width;
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.lineWidth = s * 0.045;
+    ctx.strokeStyle = getComputedStyle(cv).color;
+    cell.strokes.forEach((st) => {
+      ctx.beginPath();
+      ctx.moveTo(st[0][0] * s, st[0][1] * s);
+      if (st.length === 1) ctx.lineTo(st[0][0] * s + 0.5, st[0][1] * s);
+      st.forEach(([x, y]) => ctx.lineTo(x * s, y * s));
+      ctx.stroke();
+    });
+  };
+  const fit = () => {
+    const r = cv.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const px = Math.max(1, Math.round(r.width * dpr));
+    if (cv.width !== px || cv.height !== px) { cv.width = px; cv.height = px; }
+    draw();
+  };
+  cell.draw = draw;
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(cv);
+  fit();
+  let pid = null;
+  let cur = null;
+  const pt = (e) => {
+    const r = cv.getBoundingClientRect();
+    return [clamp((e.clientX - r.left) / r.width), clamp((e.clientY - r.top) / r.height)];
+  };
+  cv.addEventListener('pointerdown', (e) => {
+    if (pid !== null || it.phase !== 'draw' || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    e.preventDefault();
+    pid = e.pointerId;
+    try { cv.setPointerCapture(pid); } catch (err) { /* 무시 */ }
+    cur = [pt(e)];
+    cell.strokes.push(cur);
+    draw();
+  });
+  cv.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== pid) return;
+    e.preventDefault();
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+    (evs.length ? evs : [e]).forEach((x) => cur.push(pt(x)));
+    draw();
+  });
+  const end = (e) => {
+    if (e.pointerId !== pid) return;
+    pid = null; cur = null;
+    it.hist.push(cell);
+    kUpdateFoot();
+  };
+  cv.addEventListener('pointerup', end);
+  cv.addEventListener('pointercancel', end);
+}
+// 확인: 내 글씨와 본보기 나란히 + 획 수 비교 → 스스로 판정
+function kCheck(skipped) {
+  const it = kItem();
+  if (it.phase !== 'draw') return;
+  it.phase = 'check';
+  const w = KW[it.jp];
+  const row = (fn) => `<div class="kc-row">${it.cells.map((c) => `<div class="kc-cell ${c.kanji ? '' : 'kana'}">${fn(c)}</div>`).join('')}</div>`;
+  $('#kCells').outerHTML = `
+    <div class="k-compare" id="kCompare">
+      <span class="kc-lab">내 글씨</span>
+      ${row((c) => GUIDE + (c.kanji ? mineSvg(c.strokes) : glyphSvg(c.ch, 'given')))}
+      <span class="kc-lab">본보기</span>
+      ${row((c) => GUIDE + glyphSvg(c.ch, c.kanji ? 'model' : 'given'))}
+      <span class="kc-lab">획 수</span>
+      <div class="kc-row counts">${it.cells.map((c) => {
+        if (!c.kanji) return '<div class="kc-n"></div>';
+        const mine = c.strokes.length;
+        const model = (K_STROKES[c.ch] || []).length;
+        return `<div class="kc-n ${mine === model ? 'same' : 'diff'}"><b>${mine}</b> / ${model}</div>`;
+      }).join('')}</div>
+    </div>`;
+  $('.k-tools').innerHTML = `<button class="icon-btn" id="kOrder2" aria-label="획순 보기" title="획순 보기">${ic('order')}</button>`;
+  $('#kOrder2').addEventListener('click', () => showOrder(w.jp));
+  const f = $('#k-foot');
+  if (skipped) {
+    f.className = 'quiz-foot bad';
+    f.innerHTML = `<div class="foot-row"><button class="btn red" id="kGo">계속</button></div>`;
+    $('#kGo').addEventListener('click', () => kJudge(false));
+  } else {
+    f.innerHTML = `<div class="foot-row"><button class="btn red" id="kBad">틀림</button><button class="btn primary" id="kOk">맞음</button></div>`;
+    $('#kBad').addEventListener('click', () => kJudge(false));
+    $('#kOk').addEventListener('click', () => kJudge(true));
+  }
+  if (state.settings.tts) { clearTimeout(speakTimer); speak(w.reading); }
+}
+function kJudge(ok) {
+  const it = kItem();
+  if (it.phase !== 'check') return;
+  it.phase = 'done';
+  const first = !it.retry;
+  const gained = ok ? (first ? 10 : 5) : 0;
+  recordKanji(it.jp, ok, first, gained);
+  if (ok) {
+    K.solved++;
+    if (first) K.firstRight++;
+    K.xp += gained;
+    sfx('right');
+  } else {
+    K.wrong.add(it.jp);
+    const pos = Math.min(K.queue.length, K.idx + 3 + Math.floor(Math.random() * 3));
+    K.queue.splice(pos, 0, { jp: it.jp, retry: true });
+    sfx('wrong');
+  }
+  clearTimeout(speakTimer);
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  K.idx++;
+  if (K.idx >= K.queue.length) kFinish();
+  else kStartItem();
+}
+// 틀린 한자: 다른 날 2번 한 번에 맞히면 졸업
+function recordKanji(jp, ok, first, gained) {
+  const ks = (state.kanji.words[jp] = state.kanji.words[jp] || { c: 0, w: 0, last: 0 });
+  ks.last = Date.now();
+  const d = today();
+  d.q++;
+  if (ok) {
+    ks.c++;
+    d.c++;
+    d.xp += gained;
+    state.xp += gained;
+    const wn = state.kanji.wrong[jp];
+    if (wn && first) {
+      const day = dayKey();
+      wn.days = wn.days || [];
+      if (!wn.days.includes(day)) wn.days.push(day);
+      if (wn.days.length >= 2) { delete state.kanji.wrong[jp]; K.graduated.push(jp); }
+    }
+  } else {
+    ks.w++;
+    const prev = state.kanji.wrong[jp];
+    state.kanji.wrong[jp] = { added: Date.now(), n: ((prev && prev.n) || 0) + 1, days: [] };
+  }
+  save();
+}
+function saveKTime() {
+  if (!K) return;
+  const secs = Math.round((Date.now() - K.start) / 1000) - K.timeSaved;
+  if (secs > 0) { today().t += Math.min(secs, 3600); K.timeSaved += secs; save(); }
+}
+function kList(keys) {
+  if (!keys.length) return '';
+  return `<div class="wlist">${keys.map((k) => {
+    const w = KW[k];
+    const wn = state.kanji.wrong[k];
+    return `<div class="witem kitem">
+      <div class="jp">${wordGlyphs(k)}<small lang="ja">${esc(w.reading)}</small></div>
+      <div class="ko">${esc(w.ko)}</div>
+      <div class="side">${wn ? `<span class="fix">복습 <b>${(wn.days || []).length}</b>/2</span>` : ''}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+function kFinish() {
+  saveKTime();
+  const last = K;
+  const secs = Math.round((Date.now() - last.start) / 1000);
+  const acc = last.total ? Math.round((last.firstRight / last.total) * 100) : 0;
+  state.sessions.unshift({ ts: Date.now(), title: last.title, n: last.total, right: last.firstRight, xp: last.xp, secs });
+  state.sessions = state.sessions.slice(0, 100);
+  state.clears[last.title] = clears(last.title) + 1;
+  save();
+  sfx('done');
+  const wrong = [...last.wrong];
+  const d = today();
+  const heading = acc === 100 ? '완벽해요!' : acc >= 80 ? '레슨 완료!' : acc >= 50 ? '잘했어요!' : '레슨 완료';
+  $('#result-body').innerHTML = `
+    <div class="result-hero">
+      <div class="hero-badge ${acc >= 80 ? '' : 'plain'}">${ic('star')}</div>
+      <h2>${heading}</h2>
+      <p>${esc(last.title)}</p>
+      <div class="clear-count">${ic('check')}한 번에 맞힘 <b>${last.firstRight}/${last.total}</b></div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="h">획득 XP</div><div class="v">${last.xp}</div></div>
+      <div class="kpi green"><div class="h">정확도</div><div class="v">${acc}%</div></div>
+      <div class="kpi blue"><div class="h">시간</div><div class="v">${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}</div></div>
+    </div>
+    <div class="card goal"><span>오늘 목표</span><div class="gbar"><i style="width:${Math.min(100, (d.xp / state.settings.goal) * 100)}%"></i></div><b>${d.xp}/${state.settings.goal} XP</b></div>
+    ${last.graduated.length ? `<div class="section-title">졸업한 한자 (${last.graduated.length})</div>${kList(last.graduated)}` : ''}
+    ${wrong.length ? `<div class="section-title">틀린 한자 (${wrong.length})</div>${kList(wrong)}` : ''}
+    <div style="display:grid;gap:10px;margin-top:20px">
+      ${wrong.length ? `<button class="btn red" id="kRetry">틀린 한자 다시 쓰기 (${wrong.length})</button>` : ''}
+      <button class="btn ${wrong.length ? '' : 'primary'}" id="kAgain">같은 범위 한 번 더</button>
+      <button class="btn" id="kHome">홈으로</button>
+    </div>`;
+  if (wrong.length) $('#kRetry').addEventListener('click', () => startKanji(wrong, '한자 쓰기 · 틀린 한자'));
+  $('#kAgain').addEventListener('click', () => startKanji(last.src, last.title));
+  $('#kHome').addEventListener('click', closeOverlay);
+  K = null;
+  show('result');
+  $('#result-body').scrollTop = 0;
+}
+$('#kQuit').addEventListener('click', () => { saveKTime(); closeOverlay(); });
+
+// 획순 보기: 한 획씩 순서대로 그려지는 애니메이션 + 획 번호
+function showOrder(jp) {
+  const chars = [...jp].filter(isKanjiCh);
+  const start = (d) => {
+    const m = d.match(/^[Mm]\s*(-?[\d.]+)[ ,]*(-?[\d.]+)/);
+    return m ? [+m[1], +m[2]] : [0, 0];
+  };
+  openAct('획순', `
+    <div class="k-order">${chars.map((ch) => {
+      const ps = K_STROKES[ch] || [];
+      return `<div class="ko-box"><div class="ko-cell">${GUIDE}<svg class="glyph order" viewBox="0 0 109 109" aria-hidden="true">
+        <g class="ghost">${ps.map((d) => `<path d="${d}"/>`).join('')}</g>
+        <g class="anim">${ps.map((d) => `<path d="${d}"/>`).join('')}</g>
+        <g class="nums">${ps.map((d, i) => { const [x, y] = start(d); return `<g><circle cx="${x}" cy="${y}" r="5"/><text x="${x}" y="${y}">${i + 1}</text></g>`; }).join('')}</g>
+      </svg></div><span class="ko-n">${ps.length}획</span></div>`;
+    }).join('')}</div>
+    <button class="btn blue" id="kOrderAgain" aria-label="다시 보기" title="다시 보기">${ic('retry')}</button>`);
+  $('#kOrderAgain').addEventListener('click', playOrder);
+  playOrder();
+}
+function playOrder() {
+  let t = 150;
+  $$('.ko-box', $('#actBody')).forEach((box) => {
+    const nums = $$('.nums > g', box);
+    $$('.anim path', box).forEach((p, i) => {
+      const len = p.getTotalLength ? p.getTotalLength() : 100;
+      const dur = Math.max(260, len * 9);
+      p.style.strokeDasharray = `${len} ${len}`;
+      if (!p.animate) { p.style.strokeDashoffset = 0; return; }
+      p.getAnimations().forEach((a) => a.cancel());
+      nums[i].getAnimations().forEach((a) => a.cancel());
+      p.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: dur, delay: t, fill: 'both', easing: 'ease-in-out' });
+      nums[i].animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, delay: t, fill: 'both' });
+      t += dur + 140;
+    });
+    t += 260;
+  });
+}
+
+/* ============================================================
  * 전체 화면 (안드로이드 아래 내비게이션 바 숨기기)
  * ============================================================ */
 const CAN_FULL = !!document.documentElement.requestFullscreen;
@@ -1718,6 +2139,10 @@ function renderSettings() {
       </div>
       <small>단어 자동 읽기: 퀴즈에서 답했을 때, 플래시카드를 뒤집었을 때 일본어로 읽어줘요</small>
     </div>
+    <div class="set-group"><b>한자 쓰기</b>
+      <div class="seg"><button data-toggle="kanjiTest" class="${s.kanjiTest ? 'on' : ''}">시험 모드 ${s.kanjiTest ? 'ON' : 'OFF'}</button></div>
+      <small class="credit">획 데이터: KanjiVG (c) Ulrich Apel, CC BY-SA 3.0, https://kanjivg.tagaini.net</small>
+    </div>
     <div class="set-group"><b>앱 업데이트</b>
       <button class="btn small" id="setReload" style="width:100%">앱 새로고침 (최신 버전 받기)</button>
       <small>화면이 이상하거나 새 기능이 안 보이면 눌러 주세요. 학습 기록은 지워지지 않아요. · 지금 버전: <b>v${APP_VERSION}</b></small>
@@ -1753,6 +2178,10 @@ $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') { $(
  * 시작
  * ============================================================ */
 $$('[data-ic]').forEach((el) => { el.outerHTML = ic(el.dataset.ic); });
+
+// 화면 확대 막기 (iOS 사파리는 viewport 설정을 무시해서 제스처를 직접 막음)
+['gesturestart', 'gesturechange'].forEach((ev) => document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
+document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 
 // 화면 높이 = 지금 실제로 보이는 영역 (삼성 인터넷/크롬 아래 툴바, 키보드, 폴더블 화면 전환 대응)
 function fitHeight() {
