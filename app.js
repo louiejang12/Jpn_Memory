@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 19;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
+const APP_VERSION = 20;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
 const STORE_KEY = 'jpvocab.v1';
 
 /* ============================================================
@@ -1408,6 +1408,17 @@ const RENDER = {
           <span class="go">›</span>
         </button>`;
       }
+      html += `<div class="lesson-head"><h2>한자 종이 쓰기</h2></div>`;
+      notes.forEach((n) => { html += kUnit(`data-pnote="${n.id}"`, esc(n.title.replace(/\D/g, '')), n.id === 'K6' ? 'b4' : 'b3', n.title, noteKeys(n)); });
+      if (notes.length > 1) html += kUnit('id="pAllUnit"', ic('book'), 'b2', `전체 (${notes.map((n) => n.title.replace(/\D/g, '')).join('·')})`, kAll);
+      if (kWrong.length) {
+        html += `
+        <button class="unit" id="pWrongUnit">
+          <span class="badge b5">${ic('retry')}</span>
+          <span class="info"><b>틀린 한자 다시 보기</b><small><span class="num">${kWrong.length}</span>개</small></span>
+          <span class="go">›</span>
+        </button>`;
+      }
     }
     curLessons().forEach((L) => {
       const lk = lessonKeys(L.id);
@@ -1482,6 +1493,12 @@ const RENDER = {
       }));
       if ($('#kAllUnit')) $('#kAllUnit').addEventListener('click', () => startKanji(kAll, `한자 쓰기 · 전체 (${set.title})`));
       if ($('#kWrongUnit')) $('#kWrongUnit').addEventListener('click', () => startKanji(kWrong, '한자 쓰기 · 틀린 한자'));
+      $$('[data-pnote]', body).forEach((b) => b.addEventListener('click', () => {
+        const n = K_NOTES.find((x) => x.id === b.dataset.pnote);
+        startKanji(noteKeys(n), `한자 종이 쓰기 · ${n.title}`, true);
+      }));
+      if ($('#pAllUnit')) $('#pAllUnit').addEventListener('click', () => startKanji(kAll, `한자 종이 쓰기 · 전체 (${set.title})`, true));
+      if ($('#pWrongUnit')) $('#pWrongUnit').addEventListener('click', () => startKanji(kWrong, '한자 종이 쓰기 · 틀린 한자', true));
     }
   },
 
@@ -1754,12 +1771,12 @@ function mineSvg(strokes) {
 const STAGE_NAME = { 1: '따라 쓰기', 2: '보고 쓰기', 3: '안 보고 쓰기' };
 
 let K = null;
-function startKanji(keys, title) {
+function startKanji(keys, title, paper = false) {
   keys = [...new Set(keys)].filter((k) => KW[k]);
   if (!keys.length) { toast('쓸 한자가 없어요'); return; }
   closeAct();
   K = {
-    title, src: keys, queue: shuffle(keys).map((jp) => ({ jp, retry: false })), idx: 0, total: keys.length,
+    title, paper, src: keys, queue: shuffle(keys).map((jp) => ({ jp, retry: false })), idx: 0, total: keys.length,
     solved: 0, firstRight: 0, xp: 0, start: Date.now(), timeSaved: 0, wrong: new Set(), graduated: [],
   };
   if (currentView === 'result') { history.replaceState({ overlay: 'kanji' }, ''); show('kanji'); }
@@ -1769,7 +1786,7 @@ function startKanji(keys, title) {
 function kItem() { return K.queue[K.idx]; }
 function kStartItem() {
   const it = kItem();
-  it.stages = state.settings.kanjiTest ? [3] : it.retry ? [2, 3] : [1, 2, 3];
+  it.stages = K.paper ? [0] : state.settings.kanjiTest ? [3] : it.retry ? [2, 3] : [1, 2, 3];
   it.si = 0;
   kRenderStage();
 }
@@ -1778,6 +1795,7 @@ function kRenderStage() {
   const w = KW[it.jp];
   const stage = it.stages[it.si];
   it.phase = 'draw';
+  if (stage === 0) { kRenderPaper(it, w); return; }
   it.cells = w.chars.map((ch) => ({ ch, kanji: isKanjiCh(ch), strokes: [] }));
   it.hist = [];
   $('#k-bar').style.width = (K.solved / K.total) * 100 + '%';
@@ -1827,6 +1845,34 @@ function kRenderStage() {
     $('#kSkip').addEventListener('click', () => kCheck(true));
     $('#kCheck').addEventListener('click', () => kCheck(false));
   }
+}
+// 종이 쓰기: 뜻·히라가나만 보여 주고, 종이에 쓴 뒤 정답 보기 -> 스스로 판정
+function kRenderPaper(it, w) {
+  it.cells = [];
+  $('#k-bar').style.width = (K.solved / K.total) * 100 + '%';
+  $('#k-count').textContent = `${Math.min(K.solved + 1, K.total)}/${K.total}`;
+  $('#k-main').innerHTML = `
+    <div class="q-meta">
+      <span class="lesson-pill">${esc(w.note.title)}</span>
+      <span class="q-type ${it.retry ? 'retry' : ''}">${it.retry ? ic('retry') + '다시 한 번 · ' : ''}종이에 쓰기</span>
+    </div>
+    <div class="k-prompt k-paper"><div class="k-ko">${esc(w.ko)}</div><div class="k-read" lang="ja">${esc(w.reading)}</div></div>
+    <div class="k-answer" id="kAnswer"></div>`;
+  $('#k-main').scrollTop = 0;
+  const f = $('#k-foot');
+  f.className = 'quiz-foot';
+  f.innerHTML = `<div class="foot-row"><button class="btn primary" id="kReveal">정답 보기</button></div>`;
+  $('#kReveal').addEventListener('click', () => {
+    it.phase = 'check';
+    sfx('flip');
+    $('#kAnswer').innerHTML = `<div class="k-model paper">${wordGlyphs(w.jp)}</div>
+      <div class="k-tools"><button class="icon-btn" id="kOrder" aria-label="획순 보기" title="획순 보기">${ic('order')}</button></div>`;
+    $('#kOrder').addEventListener('click', () => showOrder(w.jp));
+    f.innerHTML = `<div class="foot-row"><button class="btn red" id="kBad">틀림</button><button class="btn primary" id="kOk">맞음</button></div>`;
+    $('#kBad').addEventListener('click', () => kJudge(false));
+    $('#kOk').addEventListener('click', () => kJudge(true));
+    if (state.settings.tts) { clearTimeout(speakTimer); speak(w.reading); }
+  });
 }
 const kReady = (it) => it.cells.every((c) => !c.kanji || c.strokes.length);
 function kUpdateFoot() {
@@ -2022,12 +2068,12 @@ function kFinish() {
     ${last.graduated.length ? `<div class="section-title">졸업한 한자 (${last.graduated.length})</div>${kList(last.graduated)}` : ''}
     ${wrong.length ? `<div class="section-title">틀린 한자 (${wrong.length})</div>${kList(wrong)}` : ''}
     <div style="display:grid;gap:10px;margin-top:20px">
-      ${wrong.length ? `<button class="btn red" id="kRetry">틀린 한자 다시 쓰기 (${wrong.length})</button>` : ''}
+      ${wrong.length ? `<button class="btn red" id="kRetry">${last.paper ? '틀린 한자 다시 보기' : '틀린 한자 다시 쓰기'} (${wrong.length})</button>` : ''}
       <button class="btn ${wrong.length ? '' : 'primary'}" id="kAgain">같은 범위 한 번 더</button>
       <button class="btn" id="kHome">홈으로</button>
     </div>`;
-  if (wrong.length) $('#kRetry').addEventListener('click', () => startKanji(wrong, '한자 쓰기 · 틀린 한자'));
-  $('#kAgain').addEventListener('click', () => startKanji(last.src, last.title));
+  if (wrong.length) $('#kRetry').addEventListener('click', () => startKanji(wrong, last.paper ? '한자 종이 쓰기 · 틀린 한자' : '한자 쓰기 · 틀린 한자', last.paper));
+  $('#kAgain').addEventListener('click', () => startKanji(last.src, last.title, last.paper));
   $('#kHome').addEventListener('click', closeOverlay);
   K = null;
   show('result');

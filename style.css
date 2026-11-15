@@ -712,3 +712,10 @@ h1, h2, h3 { margin: 0; }
 }
 .kitem .glyph g { stroke-width: 6; }
 .k-model .glyph g { stroke-width: 5; }
+
+/* 한자 종이 쓰기 */
+.k-prompt.k-paper { padding: 28px 12px; }
+.k-prompt.k-paper .k-ko { font-size: 30px; }
+.k-prompt.k-paper .k-read { font-size: 26px; margin-top: 8px; }
+.k-model.paper { margin-top: 18px; }
+.k-model.paper .wglyphs { font-size: 84px; gap: 6px; }
