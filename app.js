@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 20;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
+const APP_VERSION = 21;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
 const STORE_KEY = 'jpvocab.v1';
 
 /* ============================================================
@@ -901,10 +901,10 @@ function launchQuiz(keys, opts) {
   if (!saved) { startQuiz(keys, opts); return; }
   askResume(saved, () => startQuiz(keys, opts));
 }
-function launchFlash(keys, title) {
+function launchFlash(keys, title, koFirst) {
   const saved = loadResume(flashScope(title));
-  if (!saved) { startFlash(keys, title); return; }
-  askResume(saved, () => startFlash(keys, title));
+  if (!saved) { startFlash(keys, title, koFirst); return; }
+  askResume(saved, () => startFlash(keys, title, koFirst));
 }
 function askResume(r, restart) {
   const pr = resumeProgress(r);
@@ -1137,8 +1137,9 @@ function onFootPrimary() {
  * ============================================================ */
 let F = null;
 let flashKoFirst = false;
-function startFlash(keys, title) {
+function startFlash(keys, title, koFirst) {
   keys = [...new Set(keys)];
+  if (koFirst !== undefined) flashKoFirst = !!koFirst;   // 지정 안 하면 지금 방향 그대로
   if (!keys.length) { toast('단어가 없어요'); return; }
   closeAct();
   F = { scope: flashScope(title), title, queue: shuffle(keys), idx: 0, total: keys.length, known: 0, flipped: false, unknown: new Set() };
@@ -1382,6 +1383,11 @@ const RENDER = {
         <span class="badge b2">${ic('cards')}</span>
         <span class="info"><b>플래시카드로 외우기</b><small>${esc(set.title)} 전체 단어를 카드로 넘겨보기</small></span>
         <span class="go">›</span>
+      </button>
+      <button class="unit" id="flashKo">
+        <span class="badge b2">${ic('cards')}</span>
+        <span class="info"><b>플래시카드 한국어 → 일본어</b><small>${esc(set.title)} 전체 단어</small></span>
+        <span class="go">›</span>
       </button>`;
     const notes = curNotes();
     const kAll = notes.flatMap(noteKeys);
@@ -1462,7 +1468,7 @@ const RENDER = {
       $('#rcDiscard').addEventListener('click', () => {
         clearResume(resume.scope);
         if (resume.kind === 'quiz') startQuiz(resume.srcKeys, Object.assign({}, resume.opts));
-        else startFlash([...new Set(resume.queue)], resume.title);
+        else startFlash([...new Set(resume.queue)], resume.title, !!resume.koFirst);
       });
     }
     $('#examBtn').addEventListener('click', () => launchQuiz(KEYS, { title: `시험 대비 (${set.title})`, keys: KEYS }));
@@ -1472,7 +1478,8 @@ const RENDER = {
       launchQuiz(KEYS, { title, type: t, keys: KEYS });
     }));
     $('#wrongUnit').addEventListener('click', startWrongReview);
-    $('#flashAll').addEventListener('click', () => launchFlash(KEYS, `${set.title} 전체`));
+    $('#flashAll').addEventListener('click', () => launchFlash(KEYS, `${set.title} 전체`, false));
+    $('#flashKo').addEventListener('click', () => launchFlash(KEYS, `${set.title} 한국어 → 일본어`, true));
     $$('[data-lesson]', body).forEach((b) => b.addEventListener('click', () => {
       const L = LESSONS.find((x) => x.id === b.dataset.lesson);
       const keys = lessonKeys(L.id);
