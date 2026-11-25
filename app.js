@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 21;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
+const APP_VERSION = 22;   // index.html 의 ?v= 와 sw.js 캐시 이름도 같이 올리기
 const STORE_KEY = 'jpvocab.v1';
 
 /* ============================================================
